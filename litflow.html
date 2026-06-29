@@ -107,6 +107,43 @@ header {
 .hbtn-amber { color: var(--navy); background: var(--amber); border-color: var(--amber); font-weight: 700; }
 .hbtn-amber:hover { background: var(--amber-2); }
 
+/* ── Backup staleness badge ── */
+.settings-wrap { position: relative; display: inline-flex; }
+.backup-badge {
+  display: none;
+  position: absolute; top: 3px; right: 3px;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--amber);
+  border: 1.5px solid var(--navy);
+  pointer-events: none;
+}
+.backup-badge.show { display: block; }
+
+/* ── First-run onboarding banner ── */
+.onboard-banner {
+  display: flex; align-items: flex-start; gap: 0.75rem;
+  background: var(--navy-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--amber);
+  border-radius: var(--radius);
+  padding: 0.7rem 1rem;
+  font-size: 0.78rem; color: var(--slate);
+  line-height: 1.5;
+}
+.onboard-banner strong { color: var(--white); }
+.onboard-banner .banner-link {
+  background: none; border: none; padding: 0;
+  color: var(--amber); text-decoration: underline;
+  cursor: pointer; font-size: inherit;
+}
+.onboard-banner .banner-close {
+  margin-left: auto; flex-shrink: 0;
+  background: none; border: none;
+  color: var(--slate-2); font-size: 1.1rem; line-height: 1;
+  cursor: pointer; padding: 0 2px;
+}
+.onboard-banner .banner-close:hover { color: var(--white); }
+
 /* ─────────────────────────────────────────
    LAYOUT
 ───────────────────────────────────────── */
@@ -477,9 +514,13 @@ header {
     <span class="brand-byline">by Mike Martino MD/PhD</span>
   </a>
   <div class="header-divider"></div>
+  <div id="fileStatusChip" style="display:none;font-size:0.72rem;font-weight:600;flex-shrink:0"></div>
   <div class="header-stats" id="headerStats"></div>
   <div class="header-right">
-    <button class="hbtn hbtn-ghost" onclick="showView('settings')">⚙ Settings</button>
+    <span class="settings-wrap">
+      <button class="hbtn hbtn-ghost" onclick="showView('settings')">⚙ Settings</button>
+      <span class="backup-badge" id="backupBadge" title="No recent backup — export your library in Settings → Data to prevent data loss"></span>
+    </span>
     <button class="hbtn hbtn-ghost" onclick="showView('add')">+ Add Paper</button>
     <button class="hbtn hbtn-amber" onclick="showView('synthesize')">✦ Synthesize</button>
   </div>
@@ -512,6 +553,15 @@ header {
 
     <!-- TODAY -->
     <div class="view active" id="view-today">
+      <div class="onboard-banner" id="onboardBanner" style="display:none">
+        <span>⚠ <strong>Your library lives in your browser only.</strong> Clearing "cookies and site data" wipes it completely. Export a backup regularly from <button class="banner-link" onclick="showView('settings')">Settings → Data</button>, or connect a data file for permanent disk storage.</span>
+        <button class="banner-close" onclick="dismissOnboard()" title="Dismiss">×</button>
+      </div>
+      <div class="onboard-banner" id="reconnectBanner" style="display:none;background:#1a1200;border-color:#d97706;border-left-color:#f59e0b">
+        <span>📁 <strong>Data file found — permission needed.</strong> Re-link your library file to resume disk sync.</span>
+        <button class="tbtn tbtn-amber" onclick="reconnectFile()" style="margin-left:0.5rem;flex-shrink:0;font-size:0.72rem;padding:3px 10px">Reconnect →</button>
+        <button class="banner-close" onclick="document.getElementById('reconnectBanner').style.display='none'" title="Dismiss">×</button>
+      </div>
       <div id="todayCard"></div>
       <div class="stats-row" id="statsRow"></div>
       <div id="tracksGrid" class="tracks-grid"></div>
@@ -635,6 +685,22 @@ header {
 
         <div class="settings-section">
           <h4>LLM Provider</h4>
+          <div style="background:#1a1200;border:1px solid #d97706;border-radius:6px;padding:0.6rem 0.85rem;margin-bottom:0.6rem;font-size:0.75rem;color:#fbbf24;line-height:1.6">
+            <strong>Do I need an API key?</strong><br>
+            Yes — and your <strong>Claude Pro or ChatGPT Plus subscription ($20/mo) does not include one.</strong> Those are chat-only plans. The API is a separate billing account:<br>
+            <span style="display:block;margin-top:0.35rem;padding-left:0.5rem">
+              · <strong>Anthropic (Claude):</strong> <a href="https://console.anthropic.com" target="_blank" style="color:#f59e0b">console.anthropic.com</a> → create account → add credits. $5 minimum; a typical synthesis run costs ~$0.01–0.03, so $5 lasts months.<br>
+              · <strong>OpenAI (GPT):</strong> <a href="https://platform.openai.com" target="_blank" style="color:#f59e0b">platform.openai.com</a> → same deal, separate from your ChatGPT Plus account.
+            </span>
+          </div>
+          <div style="background:#052e16;border:1px solid #16a34a;border-radius:6px;padding:0.6rem 0.85rem;margin-bottom:0.6rem;font-size:0.75rem;color:#86efac;line-height:1.6">
+            <strong>Free alternative — Local models (Ollama):</strong> No API key, no cost, fully offline.<br>
+            <span style="display:block;margin-top:0.35rem;padding-left:0.5rem">
+              1. Install Ollama from <a href="https://ollama.com" target="_blank" style="color:#4ade80">ollama.com</a><br>
+              2. In a terminal: <code style="background:#0a3d1f;padding:1px 5px;border-radius:3px;font-size:0.72rem">ollama pull llama3</code> (or <code style="background:#0a3d1f;padding:1px 5px;border-radius:3px;font-size:0.72rem">mistral</code>, <code style="background:#0a3d1f;padding:1px 5px;border-radius:3px;font-size:0.72rem">phi3</code>, etc.)<br>
+              3. Select <strong>Local (Ollama)</strong> below — Base URL defaults to <code style="background:#0a3d1f;padding:1px 5px;border-radius:3px;font-size:0.72rem">http://localhost:11434/v1</code>, model = <code style="background:#0a3d1f;padding:1px 5px;border-radius:3px;font-size:0.72rem">llama3</code>
+            </span>
+          </div>
           <div style="background:#1e1a00;border:1px solid #d97706;border-radius:6px;padding:0.6rem 0.85rem;margin-bottom:0.75rem;font-size:0.75rem;color:#fbbf24;line-height:1.5">
             ⚠️ <strong>Screen share / shared workstation notice:</strong> When you run a synthesis, your API key is sent directly from your browser to the provider (Anthropic, OpenAI, or your local endpoint) as a visible request header. Anyone watching your browser's Network tab in DevTools can see it. <strong>Do not run synthesis while screen-sharing in a lab meeting or on a shared machine.</strong> On local models, no key is transmitted.
           </div>
@@ -664,6 +730,17 @@ header {
 
         <div class="settings-section">
           <h4>Data</h4>
+
+          <!-- Disk persistence -->
+          <div style="margin-bottom:0.75rem">
+            <div style="font-size:0.72rem;color:var(--muted);margin-bottom:0.5rem;line-height:1.6">
+              <strong>Disk persistence</strong> — saves your library to a real file on your computer that survives clearing browser data. Requires Chrome or Edge 86+.
+              <span id="fsUnsupportedNote" style="display:none;color:var(--faint)"> Your browser doesn't support this feature — use Export JSON below to back up regularly.</span>
+            </div>
+            <div id="fileSettingsStatus"></div>
+          </div>
+
+          <!-- Standard backup tools -->
           <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
             <button class="btn btn-outline" onclick="exportJSON()">Export JSON backup</button>
             <button class="btn btn-outline" onclick="exportMarkdown()">Export Markdown</button>
@@ -761,22 +838,222 @@ let tracks  = [];
 let settings = {};
 let currentView = 'today';
 
-function load() {
+// Disk persistence state
+let fileHandle = null;
+let pendingReconnect = false;
+const fileSystemSupported = typeof window !== 'undefined' && 'showSaveFilePicker' in window;
+
+async function load() {
+  // Always load from localStorage first (instant, no async required)
   papers   = JSON.parse(localStorage.getItem('lf_papers')  || '[]');
   tracks   = JSON.parse(localStorage.getItem('lf_tracks')  || JSON.stringify(DEFAULT_TRACKS));
   settings = JSON.parse(localStorage.getItem('lf_settings')|| JSON.stringify(DEFAULT_SETTINGS));
-  // Ensure unassigned track always present (not stored, always injected)
-  if (!tracks.find(t => t.id === 'unassigned')) {
-    tracks.unshift(UNASSIGNED_TRACK);
+  if (!tracks.find(t => t.id === 'unassigned')) tracks.unshift(UNASSIGNED_TRACK);
+
+  if (!fileSystemSupported) return;
+
+  try {
+    const storedHandle = await getStoredFileHandle();
+    if (!storedHandle) return;
+    const perm = await storedHandle.queryPermission({ mode: 'readwrite' });
+    if (perm === 'granted') {
+      const d = await readFromFileHandle(storedHandle);
+      if (d.papers)   papers = d.papers;
+      if (d.tracks) {
+        tracks = d.tracks.filter(t => t.id !== 'unassigned');
+        if (!tracks.find(t => t.id === 'unassigned')) tracks.unshift(UNASSIGNED_TRACK);
+      }
+      if (d.settings) settings = { ...DEFAULT_SETTINGS, ...d.settings };
+      fileHandle = storedHandle;
+    } else {
+      fileHandle = storedHandle;
+      pendingReconnect = true;
+    }
+  } catch (e) {
+    console.warn('LitFlow: could not load from data file:', e.message);
   }
 }
 
 function save() {
-  // Don't persist the builtin unassigned track — it's always injected on load
   const savableTracks = tracks.filter(t => !t.builtin);
   localStorage.setItem('lf_papers',   JSON.stringify(papers));
   localStorage.setItem('lf_tracks',   JSON.stringify(savableTracks));
   localStorage.setItem('lf_settings', JSON.stringify(settings));
+  if (fileHandle && !pendingReconnect) {
+    writeToFileHandle(fileHandle, { papers, tracks: savableTracks, settings })
+      .catch(e => console.warn('LitFlow: file write failed:', e.message));
+  }
+}
+
+// ─────────────────────────────────────────
+// FILE SYSTEM PERSISTENCE (Chrome/Edge 86+)
+// ─────────────────────────────────────────
+
+// IndexedDB helpers — FileSystemFileHandle can't go in localStorage
+function openHandleDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('lf_handles', 1);
+    req.onupgradeneeded = e => e.target.result.createObjectStore('handles');
+    req.onsuccess = e => resolve(e.target.result);
+    req.onerror   = e => reject(e.target.error);
+  });
+}
+async function storeFileHandle(handle) {
+  const db = await openHandleDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('handles', 'readwrite');
+    tx.objectStore('handles').put(handle, 'main');
+    tx.oncomplete = resolve;
+    tx.onerror = e => reject(e.target.error);
+  });
+}
+async function getStoredFileHandle() {
+  const db = await openHandleDB();
+  return new Promise((resolve, reject) => {
+    const tx  = db.transaction('handles', 'readonly');
+    const req = tx.objectStore('handles').get('main');
+    req.onsuccess = e => resolve(e.target.result || null);
+    req.onerror   = e => reject(e.target.error);
+  });
+}
+async function clearFileHandle() {
+  const db = await openHandleDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('handles', 'readwrite');
+    tx.objectStore('handles').delete('main');
+    tx.oncomplete = resolve;
+    tx.onerror = e => reject(e.target.error);
+  });
+}
+
+async function verifyPermission(handle) {
+  const opts = { mode: 'readwrite' };
+  if (await handle.queryPermission(opts) === 'granted') return true;
+  if (await handle.requestPermission(opts) === 'granted') return true;
+  return false;
+}
+
+async function readFromFileHandle(handle) {
+  const file = await handle.getFile();
+  const text = await file.text();
+  return JSON.parse(text);
+}
+
+async function writeToFileHandle(handle, data) {
+  const writable = await handle.createWritable();
+  await writable.write(JSON.stringify(data, null, 2));
+  await writable.close();
+}
+
+async function connectDataFile() {
+  if (!fileSystemSupported) return;
+  try {
+    const handle = await window.showSaveFilePicker({
+      suggestedName: 'litflow-data.json',
+      types: [{ description: 'LitFlow Data', accept: { 'application/json': ['.json'] } }],
+    });
+    await storeFileHandle(handle);
+    fileHandle = handle;
+    pendingReconnect = false;
+    const savableTracks = tracks.filter(t => !t.builtin);
+    await writeToFileHandle(handle, { papers, tracks: savableTracks, settings });
+    updateFileStatusUI();
+    const msg = document.getElementById('fileConnectMsg');
+    if (msg) { msg.textContent = 'Connected ✓'; setTimeout(() => msg.textContent = '', 3000); }
+  } catch (e) {
+    if (e.name !== 'AbortError') console.error('LitFlow: file connect error:', e);
+  }
+}
+
+async function reconnectFile() {
+  if (!fileHandle) return;
+  try {
+    const granted = await verifyPermission(fileHandle);
+    if (!granted) return;
+    const d = await readFromFileHandle(fileHandle);
+    if (d.papers)   papers = d.papers;
+    if (d.tracks) {
+      tracks = d.tracks.filter(t => t.id !== 'unassigned');
+      if (!tracks.find(t => t.id === 'unassigned')) tracks.unshift(UNASSIGNED_TRACK);
+    }
+    if (d.settings) settings = { ...DEFAULT_SETTINGS, ...d.settings };
+    pendingReconnect = false;
+    updateFileStatusUI();
+    renderTrackSelects(); updateHeader(); updateSidebar(); showView(currentView);
+  } catch (e) {
+    console.error('LitFlow: reconnect error:', e);
+  }
+}
+
+async function disconnectFile() {
+  await clearFileHandle();
+  fileHandle = null;
+  pendingReconnect = false;
+  updateFileStatusUI();
+}
+
+async function changeDataFile() {
+  await clearFileHandle();
+  fileHandle = null;
+  pendingReconnect = false;
+  await connectDataFile();
+}
+
+function updateFileStatusUI() {
+  const chip         = document.getElementById('fileStatusChip');
+  const settingsEl   = document.getElementById('fileSettingsStatus');
+  const reconnectEl  = document.getElementById('reconnectBanner');
+  const unsupported  = document.getElementById('fsUnsupportedNote');
+
+  if (!fileSystemSupported) {
+    if (chip) chip.style.display = 'none';
+    if (reconnectEl) reconnectEl.style.display = 'none';
+    if (unsupported) unsupported.style.display = '';
+    if (settingsEl) settingsEl.innerHTML = '';
+    return;
+  }
+  if (unsupported) unsupported.style.display = 'none';
+
+  // Header chip
+  if (chip) {
+    if (fileHandle && !pendingReconnect) {
+      chip.style.display = '';
+      chip.innerHTML = `<span style="color:var(--done);background:rgba(22,163,74,0.1);border:1px solid rgba(22,163,74,0.3);border-radius:5px;padding:2px 8px;font-size:0.68rem">📁 ${esc(fileHandle.name)} ✓</span>`;
+    } else if (pendingReconnect) {
+      chip.style.display = '';
+      chip.innerHTML = `<button class="hbtn hbtn-ghost" onclick="reconnectFile()" style="color:var(--amber);border-color:var(--amber)">📁 Reconnect file</button>`;
+    } else {
+      chip.style.display = 'none';
+    }
+  }
+
+  // Reconnect banner in Today view
+  if (reconnectEl) reconnectEl.style.display = pendingReconnect ? 'flex' : 'none';
+
+  // Settings data section
+  if (settingsEl) {
+    if (fileHandle && !pendingReconnect) {
+      settingsEl.innerHTML = `
+        <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.45rem">
+          <span style="font-size:0.8rem;color:var(--done);font-weight:600">📁 ${esc(fileHandle.name)} — syncing</span>
+          <button class="btn btn-outline" onclick="changeDataFile()">Change file</button>
+          <button class="btn btn-outline" onclick="disconnectFile()" style="color:#dc2626;border-color:#fca5a5">Disconnect</button>
+        </div>`;
+    } else if (pendingReconnect) {
+      settingsEl.innerHTML = `
+        <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.45rem">
+          <span style="font-size:0.8rem;color:var(--amber);font-weight:600">📁 ${esc(fileHandle ? fileHandle.name : 'Data file')} — permission needed</span>
+          <button class="btn btn-amber" onclick="reconnectFile()">Reconnect →</button>
+          <button class="btn btn-outline" onclick="disconnectFile()" style="color:#dc2626;border-color:#fca5a5">Forget file</button>
+        </div>`;
+    } else {
+      settingsEl.innerHTML = `
+        <div style="margin-bottom:0.45rem">
+          <button class="btn btn-amber" onclick="connectDataFile()">📁 Connect data file</button>
+          <span id="fileConnectMsg" style="font-size:0.75rem;color:var(--done);margin-left:0.5rem"></span>
+        </div>`;
+    }
+  }
 }
 
 // ─────────────────────────────────────────
@@ -794,7 +1071,7 @@ function showView(name) {
   if (name === 'today') renderToday();
   if (name === 'all')   renderAll();
   if (name === 'synthesize') renderSynthesize();
-  if (name === 'settings')   renderSettings();
+  if (name === 'settings')   { renderSettings(); updateFileStatusUI(); }
   if (name === 'add')   renderAddForm();
   updateSidebar();
   updateHeader();
@@ -1067,6 +1344,7 @@ function expandContent(p) {
           onkeydown="if(event.key==='Enter'){event.preventDefault();quickAddPaper('${p.id}')}"
         >
         <button class="btn btn-outline" onclick="quickAddPaper('${p.id}')" style="flex-shrink:0;white-space:nowrap">Add →</button>
+        <span id="quickAddMsg-${p.id}" style="font-size:0.72rem;color:var(--muted)"></span>
       </div>
     </div>
   </div>`;
@@ -1506,6 +1784,28 @@ function exportJSON() {
   a.href = URL.createObjectURL(b);
   a.download = 'litflow-backup-' + new Date().toISOString().split('T')[0] + '.json';
   a.click();
+  localStorage.setItem('lf_last_backup', new Date().toISOString());
+  checkBackupStatus();
+}
+
+function checkBackupStatus() {
+  if (papers.length === 0) return; // nothing to lose — stay quiet
+  const lastBackup = localStorage.getItem('lf_last_backup');
+  const stale = !lastBackup || (Date.now() - new Date(lastBackup).getTime()) > 7 * 24 * 60 * 60 * 1000;
+  const badge = document.getElementById('backupBadge');
+  if (badge) badge.classList.toggle('show', stale);
+
+  // First-run banner: shown once until dismissed, only when no backup has ever been taken
+  if (!lastBackup && !localStorage.getItem('lf_onboarded')) {
+    const banner = document.getElementById('onboardBanner');
+    if (banner) banner.style.display = 'flex';
+  }
+}
+
+function dismissOnboard() {
+  localStorage.setItem('lf_onboarded', '1');
+  const banner = document.getElementById('onboardBanner');
+  if (banner) banner.style.display = 'none';
 }
 
 function exportMarkdown() {
@@ -1566,11 +1866,14 @@ function esc(s) {
 // INIT
 // ─────────────────────────────────────────
 
-load();
-renderTrackSelects();
-updateSidebar();
-updateHeader();
-showView('today');
+load().then(() => {
+  renderTrackSelects();
+  updateSidebar();
+  updateHeader();
+  showView('today');
+  checkBackupStatus();
+  updateFileStatusUI();
+});
 </script>
 </body>
 </html>
