@@ -851,6 +851,13 @@ let tracks  = [];
 let settings = {};
 let currentView = 'today';
 
+// Per-filename storage namespace — isolates data when multiple copies
+// live on the same origin (e.g. litflow.html vs ann-tracker.html on Vercel)
+const NS = (location.pathname.split('/').pop() || 'litflow')
+  .replace(/\.html?$/i, '')
+  .replace(/[^a-z0-9_-]/gi, '_')
+  || 'litflow';
+
 // Disk persistence state
 let fileHandle = null;
 let pendingReconnect = false;
@@ -858,10 +865,29 @@ const fileSystemSupported = typeof window !== 'undefined' && 'showSaveFilePicker
 let pendingDeleteId = null;
 
 async function load() {
+  // One-time silent migration: move legacy un-namespaced keys → namespaced keys
+  // (only runs for litflow.html, only if new key doesn't exist yet)
+  if (NS === 'litflow' && !localStorage.getItem('lf_litflow_papers')) {
+    const legacyPapers   = localStorage.getItem('lf_papers');
+    const legacyTracks   = localStorage.getItem('lf_tracks');
+    const legacySettings = localStorage.getItem('lf_settings');
+    const legacyBackup   = localStorage.getItem('lf_last_backup');
+    const legacyOnboard  = localStorage.getItem('lf_onboarded');
+    if (legacyPapers) {
+      localStorage.setItem(`lf_${NS}_papers`,   legacyPapers);
+      localStorage.setItem(`lf_${NS}_tracks`,   legacyTracks   || '[]');
+      localStorage.setItem(`lf_${NS}_settings`, legacySettings || '{}');
+      if (legacyBackup)  localStorage.setItem(`lf_${NS}_last_backup`, legacyBackup);
+      if (legacyOnboard) localStorage.setItem(`lf_${NS}_onboarded`,   legacyOnboard);
+      ['lf_papers','lf_tracks','lf_settings','lf_last_backup','lf_onboarded']
+        .forEach(k => localStorage.removeItem(k));
+    }
+  }
+
   // Always load from localStorage first (instant, no async required)
-  papers   = JSON.parse(localStorage.getItem('lf_papers')  || '[]');
-  tracks   = JSON.parse(localStorage.getItem('lf_tracks')  || JSON.stringify(DEFAULT_TRACKS));
-  settings = JSON.parse(localStorage.getItem('lf_settings')|| JSON.stringify(DEFAULT_SETTINGS));
+  papers   = JSON.parse(localStorage.getItem(`lf_${NS}_papers`)  || '[]');
+  tracks   = JSON.parse(localStorage.getItem(`lf_${NS}_tracks`)  || JSON.stringify(DEFAULT_TRACKS));
+  settings = JSON.parse(localStorage.getItem(`lf_${NS}_settings`)|| JSON.stringify(DEFAULT_SETTINGS));
   if (!tracks.find(t => t.id === 'unassigned')) tracks.unshift(UNASSIGNED_TRACK);
 
   if (!fileSystemSupported) return;
@@ -890,9 +916,9 @@ async function load() {
 
 function save() {
   const savableTracks = tracks.filter(t => !t.builtin);
-  localStorage.setItem('lf_papers',   JSON.stringify(papers));
-  localStorage.setItem('lf_tracks',   JSON.stringify(savableTracks));
-  localStorage.setItem('lf_settings', JSON.stringify(settings));
+  localStorage.setItem(`lf_${NS}_papers`,   JSON.stringify(papers));
+  localStorage.setItem(`lf_${NS}_tracks`,   JSON.stringify(savableTracks));
+  localStorage.setItem(`lf_${NS}_settings`, JSON.stringify(settings));
   if (fileHandle && !pendingReconnect) {
     writeToFileHandle(fileHandle, { papers, tracks: savableTracks, settings })
       .catch(e => console.warn('LitFlow: file write failed:', e.message));
@@ -916,7 +942,7 @@ async function storeFileHandle(handle) {
   const db = await openHandleDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction('handles', 'readwrite');
-    tx.objectStore('handles').put(handle, 'main');
+    tx.objectStore('handles').put(handle, NS);
     tx.oncomplete = resolve;
     tx.onerror = e => reject(e.target.error);
   });
@@ -925,7 +951,7 @@ async function getStoredFileHandle() {
   const db = await openHandleDB();
   return new Promise((resolve, reject) => {
     const tx  = db.transaction('handles', 'readonly');
-    const req = tx.objectStore('handles').get('main');
+    const req = tx.objectStore('handles').get(NS);
     req.onsuccess = e => resolve(e.target.result || null);
     req.onerror   = e => reject(e.target.error);
   });
@@ -934,7 +960,7 @@ async function clearFileHandle() {
   const db = await openHandleDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction('handles', 'readwrite');
-    tx.objectStore('handles').delete('main');
+    tx.objectStore('handles').delete(NS);
     tx.oncomplete = resolve;
     tx.onerror = e => reject(e.target.error);
   });
@@ -1830,26 +1856,26 @@ function exportJSON() {
   a.href = URL.createObjectURL(b);
   a.download = 'litflow-backup-' + new Date().toISOString().split('T')[0] + '.json';
   a.click();
-  localStorage.setItem('lf_last_backup', new Date().toISOString());
+  localStorage.setItem(`lf_${NS}_last_backup`, new Date().toISOString());
   checkBackupStatus();
 }
 
 function checkBackupStatus() {
   if (papers.length === 0) return; // nothing to lose — stay quiet
-  const lastBackup = localStorage.getItem('lf_last_backup');
+  const lastBackup = localStorage.getItem(`lf_${NS}_last_backup`);
   const stale = !lastBackup || (Date.now() - new Date(lastBackup).getTime()) > 7 * 24 * 60 * 60 * 1000;
   const badge = document.getElementById('backupBadge');
   if (badge) badge.classList.toggle('show', stale);
 
   // First-run banner: shown once until dismissed, only when no backup has ever been taken
-  if (!lastBackup && !localStorage.getItem('lf_onboarded')) {
+  if (!lastBackup && !localStorage.getItem(`lf_${NS}_onboarded`)) {
     const banner = document.getElementById('onboardBanner');
     if (banner) banner.style.display = 'flex';
   }
 }
 
 function dismissOnboard() {
-  localStorage.setItem('lf_onboarded', '1');
+  localStorage.setItem(`lf_${NS}_onboarded`, '1');
   const banner = document.getElementById('onboardBanner');
   if (banner) banner.style.display = 'none';
 }
@@ -1897,9 +1923,9 @@ function importJSON(e) {
 function confirmReset() { document.getElementById('resetModal').classList.add('open'); }
 function closeModal()   { document.getElementById('resetModal').classList.remove('open'); }
 function doReset() {
-  localStorage.removeItem('lf_papers');
-  localStorage.removeItem('lf_tracks');
-  localStorage.removeItem('lf_settings');
+  localStorage.removeItem(`lf_${NS}_papers`);
+  localStorage.removeItem(`lf_${NS}_tracks`);
+  localStorage.removeItem(`lf_${NS}_settings`);
   closeModal(); load(); updateHeader(); updateSidebar(); showView('today');
 }
 
