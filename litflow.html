@@ -794,6 +794,19 @@ header {
   </main>
 </div>
 
+<!-- Paper delete confirmation modal -->
+<div class="modal-bg" id="paperDeleteModal">
+  <div class="modal">
+    <h3>Delete this paper?</h3>
+    <p id="deleteModalTitle" style="font-weight:600;color:var(--navy);margin-bottom:0.5rem"></p>
+    <p id="deleteModalWarning" style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;line-height:1.6"></p>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closePaperDeleteModal()">Cancel</button>
+      <button class="btn" style="background:#dc2626;color:white;border-color:#dc2626" onclick="doDeletePaper()">Delete permanently</button>
+    </div>
+  </div>
+</div>
+
 <!-- Reset confirmation modal -->
 <div class="modal-bg" id="resetModal">
   <div class="modal">
@@ -842,6 +855,7 @@ let currentView = 'today';
 let fileHandle = null;
 let pendingReconnect = false;
 const fileSystemSupported = typeof window !== 'undefined' && 'showSaveFilePicker' in window;
+let pendingDeleteId = null;
 
 async function load() {
   // Always load from localStorage first (instant, no async required)
@@ -1297,7 +1311,7 @@ function expandContent(p) {
           <option value="todo" ${p.status==='todo'?'selected':''}>To Read</option>
           <option value="reading" ${p.status==='reading'?'selected':''}>Reading</option>
           <option value="done" ${p.status==='done'?'selected':''}>Done</option>
-          <option value="skip" ${p.status==='skip'?'selected':''}>Skip</option>
+          <option value="skip" ${p.status==='skip'?'selected':''}>Skip / exclude from synthesis</option>
         </select>
       </div>
       <div class="nf full"><label>Study Design</label><textarea rows="2" oninput="updateF('${p.id}','design',this.value)">${esc(p.design)}</textarea></div>
@@ -1314,6 +1328,7 @@ function expandContent(p) {
       </div>
     </div>
     <div class="expand-actions">
+      <button class="btn btn-outline" onclick="deletePaper('${p.id}')" style="color:#dc2626;border-color:#fca5a5;margin-right:auto">✕ Delete</button>
       <button class="btn btn-outline" onclick="runPaperAI('${p.id}','summarize')">✦ Summarize</button>
       <button class="btn btn-outline" onclick="runPaperAI('${p.id}','next')">✦ What to read next?</button>
       <button class="btn btn-outline" onclick="toggleCard('${p.id}')">Collapse</button>
@@ -1757,6 +1772,37 @@ function copySynOutput() {
     document.getElementById('synStatus').textContent = 'Copied!';
     setTimeout(() => document.getElementById('synStatus').textContent = '', 2000);
   });
+}
+
+// ─────────────────────────────────────────
+// DELETE PAPER
+// ─────────────────────────────────────────
+
+function deletePaper(id) {
+  const p = papers.find(x => x.id === id);
+  if (!p) return;
+  const noteFields = [p.design, p.methods, p.findings, p.relevance, p.questions, p.notes];
+  const noteCount = noteFields.filter(f => f && f.trim()).length;
+  pendingDeleteId = id;
+  document.getElementById('deleteModalTitle').textContent = p.title;
+  document.getElementById('deleteModalWarning').innerHTML = noteCount > 0
+    ? `<span style="color:#dc2626;font-weight:600">⚠ This paper has notes in ${noteCount} field${noteCount > 1 ? 's' : ''}. Deleting is permanent and cannot be undone.</span>`
+    : 'This paper has no notes. It will be permanently removed.';
+  document.getElementById('paperDeleteModal').classList.add('open');
+}
+
+function doDeletePaper() {
+  papers = papers.filter(x => x.id !== pendingDeleteId);
+  pendingDeleteId = null;
+  save(); updateHeader(); updateSidebar();
+  closePaperDeleteModal();
+  renderAll();
+  renderToday();
+}
+
+function closePaperDeleteModal() {
+  document.getElementById('paperDeleteModal').classList.remove('open');
+  pendingDeleteId = null;
 }
 
 // ─────────────────────────────────────────
