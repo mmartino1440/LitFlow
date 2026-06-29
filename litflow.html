@@ -1913,7 +1913,21 @@ function importJSON(e) {
   r.onload = ev => {
     try {
       const d = JSON.parse(ev.target.result);
-      if (d.papers) { papers = d.papers; tracks = d.tracks || tracks; save(); }
+      let imported;
+      if (Array.isArray(d)) {
+        imported = d;
+      } else if (d.papers) {
+        papers = d.papers;
+        tracks = d.tracks || tracks;
+        imported = papers;
+      }
+      if (imported) {
+        papers = imported.map(p => ({
+          ...p,
+          track: /^\d+$/.test(p.track || '') ? `t${p.track}` : (p.track || 'unassigned')
+        }));
+        save();
+      }
       updateHeader(); updateSidebar(); showView('today');
     } catch { alert('Invalid JSON file.'); }
   };
