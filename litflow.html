@@ -815,6 +815,8 @@ header {
           <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
             <button class="btn btn-outline" onclick="exportJSON()">Export JSON backup</button>
             <button class="btn btn-outline" onclick="exportMarkdown()">Export Markdown</button>
+            <button class="btn btn-outline" onclick="exportRIS()" title="Import into EndNote, Zotero, Mendeley, RefWorks, and most citation managers">Export Citations (RIS)</button>
+            <button class="btn btn-outline" onclick="exportBibTeX()" title="Import into BibTeX / LaTeX workflows">Export BibTeX</button>
             <button class="btn btn-outline" onclick="triggerImport()">Import JSON</button>
             <input type="file" id="importFile" accept=".json" style="display:none" onchange="importJSON(event)">
             <button class="btn btn-outline" onclick="confirmReset()" style="color:#dc2626;border-color:#fca5a5">Reset all data</button>
@@ -1429,6 +1431,7 @@ function expandContent(p) {
       <button class="btn btn-outline" onclick="deletePaper('${p.id}')" style="color:#dc2626;border-color:#fca5a5;margin-right:auto">✕ Delete</button>
       <button class="btn btn-outline" onclick="runPaperAI('${p.id}','summarize')">✦ Summarize</button>
       <button class="btn btn-outline" onclick="runPaperAI('${p.id}','next')">✦ What to read next?</button>
+      <button class="btn btn-outline cite-btn" id="citeBtn-${p.id}" onclick="copySingleRIS('${p.id}');event.stopPropagation()" title="Copy citation as RIS — paste into EndNote, Zotero, Mendeley…">📋 Cite</button>
       <button class="btn btn-outline" onclick="document.getElementById('pc-all-${p.id}').classList.remove('open');event.stopPropagation()">Collapse</button>
       <button class="btn btn-green" onclick="setStatus('${p.id}','done');renderAll()">Mark Complete ✓</button>
     </div>
@@ -2165,6 +2168,100 @@ function exportMarkdown() {
   a.href = URL.createObjectURL(b);
   a.download = 'litflow-notes-' + new Date().toISOString().split('T')[0] + '.md';
   a.click();
+}
+
+// ─────────────────────────────────────────
+// CITATION EXPORT (RIS + BibTeX)
+// ─────────────────────────────────────────
+
+function parseCitation(citStr) {
+  if (!citStr) return { authors: [], year: '', journal: '' };
+  const yearMatch = citStr.match(/\b(19|20)\d{2}\b/);
+  const year = yearMatch ? yearMatch[0] : '';
+  const yearIdx = year ? citStr.indexOf(year) : -1;
+  const beforeYear = yearIdx > 0 ? citStr.slice(0, yearIdx).replace(/[,.\s]+$/, '').trim() : '';
+  const afterYear  = yearIdx > 0 ? citStr.slice(yearIdx + 4).replace(/^[,.\s]+/, '').trim() : '';
+  // Split authors, but keep "et al." intact
+  let authors = [];
+  if (beforeYear) {
+    if (/et al/i.test(beforeYear)) {
+      authors = [beforeYear.replace(/,\s*$/, '').trim()];
+    } else {
+      authors = beforeYear.split(',').map(a => a.trim()).filter(Boolean);
+    }
+  }
+  return { authors, year, journal: afterYear };
+}
+
+function buildRIS(paperList) {
+  const typeMap = { paper: 'JOUR', review: 'JOUR', blog: 'ELEC', docs: 'COMP' };
+  return paperList.map(p => {
+    const { authors, year, journal } = parseCitation(p.citation);
+    const isDoi = p.link && /^(https?:\/\/doi\.org\/|10\.\d{4,})/.test(p.link);
+    const doi   = isDoi ? p.link.replace(/^https?:\/\/doi\.org\//, '') : '';
+    const trackName = (tracks.find(t => t.id === p.track) || {}).name || '';
+    const lines = [
+      `TY  - ${typeMap[p.type] || 'JOUR'}`,
+      `TI  - ${p.title}`,
+      ...authors.map(a => `AU  - ${a}`),
+      year    ? `PY  - ${year}`    : null,
+      journal ? `JO  - ${journal}` : null,
+      p.link  ? `UR  - ${p.link}` : null,
+      doi     ? `DO  - ${doi}`     : null,
+      p.findings  ? `AB  - ${p.findings}`  : null,
+      trackName   ? `KW  - ${trackName}`   : null,
+      `ER  - `,
+    ].filter(l => l !== null);
+    return lines.join('\n');
+  }).join('\n\n');
+}
+
+function buildBibTeX(paperList) {
+  const typeMap = { paper: 'article', review: 'article', blog: 'misc', docs: 'misc' };
+  const usedKeys = {};
+  return paperList.map(p => {
+    const { authors, year, journal } = parseCitation(p.citation);
+    const firstWord = (authors[0] || 'unknown').match(/^(\w+)/);
+    const base = (firstWord ? firstWord[1].toLowerCase() : 'unknown') + (year || 'xxxx');
+    usedKeys[base] = (usedKeys[base] || 0) + 1;
+    const key = usedKeys[base] > 1 ? base + String.fromCharCode(96 + usedKeys[base]) : base;
+    const lines = [
+      `@${typeMap[p.type] || 'article'}{${key},`,
+      `  title   = {${p.title}},`,
+      authors.length ? `  author  = {${authors.join(' and ')}},` : null,
+      year    ? `  year    = {${year}},`    : null,
+      journal ? `  journal = {${journal}},` : null,
+      p.link  ? `  url     = {${p.link}},`  : null,
+      p.findings ? `  abstract = {${p.findings.replace(/[{}]/g, '')}},` : null,
+      `}`,
+    ].filter(l => l !== null);
+    return lines.join('\n');
+  }).join('\n\n');
+}
+
+function exportRIS() {
+  const list = papers.filter(p => p.status !== 'skip');
+  if (!list.length) { alert('No papers to export.'); return; }
+  const b = new Blob([buildRIS(list)], { type: 'application/x-research-info-systems' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(b); a.download = 'litflow-' + new Date().toISOString().split('T')[0] + '.ris'; a.click();
+}
+
+function exportBibTeX() {
+  const list = papers.filter(p => p.status !== 'skip');
+  if (!list.length) { alert('No papers to export.'); return; }
+  const b = new Blob([buildBibTeX(list)], { type: 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(b); a.download = 'litflow-' + new Date().toISOString().split('T')[0] + '.bib'; a.click();
+}
+
+function copySingleRIS(id) {
+  const p = papers.find(x => x.id === id);
+  if (!p) return;
+  navigator.clipboard.writeText(buildRIS([p])).then(() => {
+    const btn = document.getElementById('citeBtn-' + id);
+    if (btn) { btn.textContent = '✓ Copied!'; setTimeout(() => btn.textContent = '📋 Cite', 1800); }
+  });
 }
 
 function triggerImport() { document.getElementById('importFile').click(); }
