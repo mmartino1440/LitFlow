@@ -638,6 +638,56 @@ header {
             <input type="text" id="customPrompt" placeholder="e.g. What are the main methodological limitations across these papers?">
           </div>
         </div>
+
+        <!-- MULTI-STEP METHOD -->
+        <div style="border-top:1px solid var(--surf-3);padding-top:0.75rem;margin-bottom:0.75rem">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.65rem;align-items:start">
+            <div class="setting-row" style="margin-bottom:0">
+              <label>Multi-Step Method</label>
+              <select id="synMethod" onchange="updateMultiStepUI()">
+                <option value="standard">Standard (one shot)</option>
+                <option value="batch_condense">Batch + Condense</option>
+                <option value="consensus">Multi-Agent Consensus</option>
+              </select>
+            </div>
+            <div id="batchOpts" style="display:none">
+              <div class="setting-row" style="margin-bottom:0.4rem">
+                <label>Chunk size (papers per batch)</label>
+                <select id="synChunkSize" onchange="updateMultiStepUI()">
+                  <option value="3">3 papers</option>
+                  <option value="5" selected>5 papers</option>
+                  <option value="7">7 papers</option>
+                  <option value="10">10 papers</option>
+                </select>
+              </div>
+              <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.73rem;color:var(--slate);cursor:pointer">
+                <input type="checkbox" id="showIntermediate" style="accent-color:var(--amber)">
+                Show intermediate batch summaries
+              </label>
+            </div>
+            <div id="consensusOpts" style="display:none">
+              <div class="setting-row" style="margin-bottom:0.4rem">
+                <label>Independent agents</label>
+                <select id="synAgentCount" onchange="updateMultiStepUI()">
+                  <option value="2" selected>2 agents</option>
+                  <option value="3">3 agents</option>
+                </select>
+              </div>
+              <div class="setting-row" style="margin-bottom:0">
+                <label>Output</label>
+                <select id="synMergeMode">
+                  <option value="merge">Merge into consensus</option>
+                  <option value="sidebyside">Show all responses</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          <div id="multiStepWarning" style="display:none;margin-top:0.55rem;background:#1e1a00;border:1px solid #d97706;border-radius:6px;padding:0.55rem 0.85rem;font-size:0.73rem;color:#fbbf24;line-height:1.6">
+            <strong>⚠ Multi-step synthesis makes multiple LLM calls.</strong> Estimated usage: <span id="tokenEstimate">~? tokens</span>.<br>
+            Strongly recommended: use a <strong>local model (Ollama)</strong> to avoid API charges. Cloud API estimated cost: $0.05–$0.50+ depending on library size and provider.
+          </div>
+        </div>
+
         <div style="display:flex;gap:0.5rem;margin-bottom:0.85rem;align-items:center;flex-wrap:wrap">
           <button class="btn btn-ai" onclick="runSynthesize()" id="synBtn">✦ Run Synthesis</button>
           <button class="btn btn-outline" onclick="copySynOutput()">Copy Output</button>
@@ -647,6 +697,27 @@ header {
           </label>
           <span id="synStatus" style="font-size:0.75rem;color:var(--muted)"></span>
         </div>
+
+        <!-- MULTI-STEP PROGRESS -->
+        <div id="multiStepProgress" style="display:none;margin-bottom:0.65rem">
+          <div style="font-size:0.76rem;font-weight:600;color:var(--amber);margin-bottom:0.4rem" id="multiStepStatus"></div>
+          <div style="background:var(--surf-3);border-radius:4px;height:5px;overflow:hidden">
+            <div id="multiStepBar" style="height:100%;background:var(--amber);width:0%;transition:width 0.35s ease"></div>
+          </div>
+        </div>
+
+        <!-- INTERMEDIATE BATCH SUMMARIES -->
+        <div id="intermediateSummaries" style="display:none;margin-bottom:0.65rem">
+          <div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin-bottom:0.35rem">Batch Summaries</div>
+          <div id="intermediateSummaryList" style="display:flex;flex-direction:column;gap:0.45rem;max-height:260px;overflow-y:auto"></div>
+        </div>
+
+        <!-- SIDE-BY-SIDE CONSENSUS RESPONSES -->
+        <div id="consensusPanel" style="display:none;margin-bottom:0.65rem">
+          <div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin-bottom:0.35rem">Agent Responses</div>
+          <div id="consensusList" style="display:flex;flex-direction:column;gap:0.45rem"></div>
+        </div>
+
         <div class="ai-output placeholder" id="synOutput">
           Your synthesized output will appear here. Configure your API settings first (⚙ Settings), then select a source and mode above.
         </div>
@@ -1305,7 +1376,8 @@ function paperCardHTML(p, withExpand) {
   const titleEl = p.link
     ? `<a href="${p.link}" target="_blank" onclick="event.stopPropagation()">${esc(p.title)}</a>`
     : esc(p.title);
-  return `<div class="paper-card ${p.status}" id="pc-${p.id}" onclick="toggleCard('${p.id}')">
+  const prefix = withExpand ? 'all' : 'today';
+  return `<div class="paper-card ${p.status}" id="pc-${prefix}-${p.id}" onclick="this.classList.toggle('open')">
     <div class="paper-title-row">
       <div style="flex:1">
         <div class="paper-title-text">${titleEl}</div>
@@ -1357,7 +1429,7 @@ function expandContent(p) {
       <button class="btn btn-outline" onclick="deletePaper('${p.id}')" style="color:#dc2626;border-color:#fca5a5;margin-right:auto">✕ Delete</button>
       <button class="btn btn-outline" onclick="runPaperAI('${p.id}','summarize')">✦ Summarize</button>
       <button class="btn btn-outline" onclick="runPaperAI('${p.id}','next')">✦ What to read next?</button>
-      <button class="btn btn-outline" onclick="toggleCard('${p.id}')">Collapse</button>
+      <button class="btn btn-outline" onclick="document.getElementById('pc-all-${p.id}').classList.remove('open');event.stopPropagation()">Collapse</button>
       <button class="btn btn-green" onclick="setStatus('${p.id}','done');renderAll()">Mark Complete ✓</button>
     </div>
     <div class="ai-panel" id="pAI-${p.id}" style="display:none">
@@ -1391,13 +1463,6 @@ function expandContent(p) {
   </div>`;
 }
 
-function toggleCard(id) {
-  const card = document.getElementById('pc-' + id);
-  const exp  = document.getElementById('pe-' + id);
-  if (!card || !exp) return;
-  card.classList.toggle('open');
-}
-
 function openPaperCard(id) {
   showView('all');
   document.getElementById('fTrack').value = 'all';
@@ -1406,8 +1471,8 @@ function openPaperCard(id) {
   document.getElementById('searchQ').value = '';
   renderAll();
   setTimeout(() => {
-    const el = document.getElementById('pc-' + id);
-    if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); if (!el.classList.contains('open')) toggleCard(id); }
+    const el = document.getElementById('pc-all-' + id);
+    if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.classList.add('open'); }
   }, 100);
 }
 
@@ -1651,6 +1716,7 @@ function renderSynthesize() {
     const custom = document.getElementById('synMode').value === 'custom';
     document.getElementById('customPromptRow').style.display = custom ? '' : 'none';
   };
+  updateMultiStepUI();
 }
 
 function updateSynCount() {
@@ -1691,8 +1757,9 @@ function buildSynthPrompt(paperList, mode, includeNotes) {
 }
 
 async function runSynthesize() {
-  const src   = document.getElementById('synSource').value;
-  const mode  = document.getElementById('synMode').value;
+  const src      = document.getElementById('synSource').value;
+  const mode     = document.getElementById('synMode').value;
+  const method   = document.getElementById('synMethod').value;
   const relevant = getPapersForSynth(src).filter(p => p.status === 'done');
 
   if (!relevant.length) {
@@ -1708,24 +1775,39 @@ async function runSynthesize() {
     return;
   }
 
-  const prompt = buildSynthPrompt(relevant, mode, document.getElementById('includeNotes')?.checked || false);
-  const out = document.getElementById('synOutput');
   const btn = document.getElementById('synBtn');
-  const status = document.getElementById('synStatus');
-  out.className = 'ai-output';
-  out.textContent = '⏳ Sending to ' + (provider === 'local' ? 'local model' : model) + '…';
   btn.disabled = true;
-  status.textContent = `Using ${relevant.length} papers…`;
 
-  try {
-    const result = await callLLM(prompt, model, provider, apiKey, baseUrl);
-    out.textContent = result;
-    status.textContent = '✓ Done';
-    setTimeout(() => status.textContent = '', 3000);
-  } catch (e) {
-    out.textContent = 'Error: ' + e.message + '\n\nCheck your API key and model name in Settings. If using a local model, make sure it is running.';
-    status.textContent = 'Error';
+  if (method === 'batch_condense') {
+    const chunkSize       = parseInt(document.getElementById('synChunkSize').value) || 5;
+    const showIntermediate = document.getElementById('showIntermediate').checked;
+    await runBatchCondense(relevant, mode, chunkSize, showIntermediate);
+  } else if (method === 'consensus') {
+    const agentCount = parseInt(document.getElementById('synAgentCount').value) || 2;
+    const mergeMode  = document.getElementById('synMergeMode').value;
+    await runConsensus(relevant, mode, agentCount, mergeMode);
+  } else {
+    // Standard one-shot
+    const prompt = buildSynthPrompt(relevant, mode, document.getElementById('includeNotes')?.checked || false);
+    const out    = document.getElementById('synOutput');
+    const status = document.getElementById('synStatus');
+    document.getElementById('multiStepProgress').style.display     = 'none';
+    document.getElementById('intermediateSummaries').style.display = 'none';
+    document.getElementById('consensusPanel').style.display        = 'none';
+    out.className = 'ai-output';
+    out.textContent = '⏳ Sending to ' + (provider === 'local' ? 'local model' : model) + '…';
+    status.textContent = `Using ${relevant.length} papers…`;
+    try {
+      const result = await callLLM(prompt, model, provider, apiKey, baseUrl);
+      out.textContent = result;
+      status.textContent = '✓ Done';
+      setTimeout(() => status.textContent = '', 3000);
+    } catch (e) {
+      out.textContent = 'Error: ' + e.message + '\n\nCheck your API key and model name in Settings. If using a local model, make sure it is running.';
+      status.textContent = 'Error';
+    }
   }
+
   btn.disabled = false;
 }
 
@@ -1798,6 +1880,187 @@ function copySynOutput() {
     document.getElementById('synStatus').textContent = 'Copied!';
     setTimeout(() => document.getElementById('synStatus').textContent = '', 2000);
   });
+}
+
+// ─────────────────────────────────────────
+// MULTI-STEP SYNTHESIS
+// ─────────────────────────────────────────
+
+function updateMultiStepUI() {
+  const method   = document.getElementById('synMethod')?.value || 'standard';
+  const src      = document.getElementById('synSource')?.value || 'all';
+  const relevant = getPapersForSynth(src).filter(p => p.status === 'done');
+
+  document.getElementById('batchOpts').style.display     = method === 'batch_condense' ? '' : 'none';
+  document.getElementById('consensusOpts').style.display = method === 'consensus'      ? '' : 'none';
+
+  const warningEl = document.getElementById('multiStepWarning');
+  const estEl     = document.getElementById('tokenEstimate');
+
+  if (method === 'standard') {
+    warningEl.style.display = 'none';
+    return;
+  }
+
+  // Rough token estimate: ~200 words of notes per paper × 1.35 tokens/word + per-call overhead
+  const tokensPerPaper = 270;
+  let totalTokens;
+
+  if (method === 'batch_condense') {
+    const chunkSize = parseInt(document.getElementById('synChunkSize')?.value) || 5;
+    const nChunks   = Math.ceil(relevant.length / chunkSize);
+    totalTokens = nChunks * (chunkSize * tokensPerPaper + 500) + nChunks * 350 + 600;
+  } else {
+    const agentCount = parseInt(document.getElementById('synAgentCount')?.value) || 2;
+    totalTokens = agentCount * (relevant.length * tokensPerPaper + 700) + agentCount * 450 + 600;
+  }
+
+  const fmt = n => n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(Math.round(n));
+  estEl.textContent = `~${fmt(totalTokens)} tokens`;
+  estEl.style.color = totalTokens > 20000 ? '#f87171' : totalTokens > 5000 ? '#fbbf24' : '#86efac';
+  warningEl.style.display = '';
+}
+
+function buildChunkSummaryPrompt(chunk, proj, includeNotes) {
+  const notes = chunk.map((p, i) => {
+    const parts = [];
+    if (p.design)                    parts.push(`Study design: ${p.design}`);
+    if (p.methods)                   parts.push(`Methods: ${p.methods}`);
+    if (p.findings)                  parts.push(`Findings: ${p.findings}`);
+    if (p.relevance)                 parts.push(`Relevance to ${proj}: ${p.relevance}`);
+    if (p.questions)                 parts.push(`Open questions: ${p.questions}`);
+    if (includeNotes && p.notes)     parts.push(`Scratch notes: ${p.notes}`);
+    return `[${i+1}] ${p.title} (${p.citation || 'citation unknown'})\n${parts.join('\n') || '(no notes)'}`;
+  }).join('\n\n---\n\n');
+  return `Based ONLY on the researcher's notes below — do not add information from your training data — write a concise structured summary of these ${chunk.length} papers. For each paper note the core finding, methodology, and relevance to "${proj}". Then identify 1–2 shared themes across this batch.\n\nNotes:\n${notes}`;
+}
+
+function buildCondensePrompt(summaries, mode, proj) {
+  const combined = summaries.map((s, i) => `[Batch ${i+1}]\n${s}`).join('\n\n---\n\n');
+  const instructions = {
+    lit_review:      `write a structured literature review section of 400–600 words. Use in-text citations where possible. Synthesize themes; do not list papers sequentially. Write in formal academic prose.`,
+    gap_analysis:    `identify key gaps, open questions, and unresolved debates. Structure as: (1) what is well established, (2) what is contested, (3) what is missing, (4) where the researcher's project could contribute.`,
+    methods_summary: `summarize and group methods across all papers. Note the most common approaches, variations, and methodological limitations flagged.`,
+    findings_table:  `create a structured comparison table: Paper | Study Design | Key Finding | Relevance to ${proj}. Include all papers from the batch summaries.`,
+    relevance:       `write a 300–500 word synthesis of how this body of literature supports, challenges, or provides context for "${proj}".`,
+    custom:          `synthesize the key themes, findings, and implications across all batch summaries into a coherent final output.`,
+  };
+  return `You are a scientific writing assistant. You have received structured summaries from ${summaries.length} batches of a researcher's literature library (project: "${proj}"). Based ONLY on these batch summaries — do not add information from your training data — ${instructions[mode] || instructions.custom}\n\nBatch summaries:\n${combined}`;
+}
+
+function buildMergePrompt(responses, mode, proj) {
+  const combined = responses.map((r, i) => `[Agent ${i+1}]\n${r}`).join('\n\n---\n\n');
+  return `You have received ${responses.length} independent syntheses of the same literature library (project: "${proj}"). Identify where the agents agree and where they diverge, then produce a single authoritative consensus ${mode.replace('_', ' ')} that resolves disagreements by weighing what is better supported. Do not simply concatenate — write a coherent final output.\n\n${combined}`;
+}
+
+function setMultiStepProgress(label, pct) {
+  const prog = document.getElementById('multiStepProgress');
+  const bar  = document.getElementById('multiStepBar');
+  const lbl  = document.getElementById('multiStepStatus');
+  if (label === null) { prog.style.display = 'none'; return; }
+  prog.style.display = '';
+  lbl.textContent    = label;
+  bar.style.width    = pct + '%';
+}
+
+async function runBatchCondense(paperList, mode, chunkSize, showIntermediate) {
+  const { apiKey, model, provider, baseUrl } = settings;
+  const proj     = settings.project || 'my research project';
+  const incNotes = document.getElementById('includeNotes')?.checked || false;
+  const out      = document.getElementById('synOutput');
+  const status   = document.getElementById('synStatus');
+  const interEl  = document.getElementById('intermediateSummaries');
+  const listEl   = document.getElementById('intermediateSummaryList');
+
+  const chunks = [];
+  for (let i = 0; i < paperList.length; i += chunkSize) chunks.push(paperList.slice(i, i + chunkSize));
+
+  out.className = 'ai-output';
+  out.textContent = '…';
+  interEl.style.display = showIntermediate ? '' : 'none';
+  listEl.innerHTML = '';
+  document.getElementById('consensusPanel').style.display = 'none';
+  setMultiStepProgress(`Step 1 of 2 — Summarizing batch 1 of ${chunks.length}…`, 0);
+
+  const summaries = [];
+  try {
+    for (let i = 0; i < chunks.length; i++) {
+      setMultiStepProgress(`Step 1 of 2 — Summarizing batch ${i+1} of ${chunks.length}…`, Math.round((i / chunks.length) * 60));
+      status.textContent = `Batch ${i+1}/${chunks.length}…`;
+      const prompt  = buildChunkSummaryPrompt(chunks[i], proj, incNotes);
+      const summary = await callLLM(prompt, model, provider, apiKey, baseUrl);
+      summaries.push(summary);
+      if (showIntermediate) {
+        const titles = chunks[i].map(p => p.title).join(', ');
+        listEl.innerHTML += `<details style="background:var(--navy-2);border:1px solid var(--border);border-radius:5px;padding:0.45rem 0.75rem;font-size:0.78rem">
+          <summary style="cursor:pointer;color:var(--amber);font-weight:600">Batch ${i+1} — ${chunks[i].length} papers</summary>
+          <div style="margin-top:0.4rem;color:var(--faint);font-size:0.68rem;margin-bottom:0.35rem">${esc(titles)}</div>
+          <div style="white-space:pre-wrap;color:var(--white);line-height:1.6">${esc(summary)}</div>
+        </details>`;
+      }
+    }
+    setMultiStepProgress(`Step 2 of 2 — Condensing ${chunks.length} batch summaries…`, 65);
+    status.textContent = 'Condensing…';
+    const result = await callLLM(buildCondensePrompt(summaries, mode, proj), model, provider, apiKey, baseUrl);
+    out.textContent = result;
+    setMultiStepProgress(null, 100);
+    status.textContent = '✓ Done';
+    setTimeout(() => status.textContent = '', 3000);
+  } catch (e) {
+    out.textContent = 'Error: ' + e.message + '\n\nCheck your API key and model name in Settings. If using a local model, make sure it is running.';
+    status.textContent = 'Error';
+    setMultiStepProgress(null, 0);
+  }
+}
+
+async function runConsensus(paperList, mode, agentCount, mergeMode) {
+  const { apiKey, model, provider, baseUrl } = settings;
+  const proj     = settings.project || 'my research project';
+  const incNotes = document.getElementById('includeNotes')?.checked || false;
+  const out      = document.getElementById('synOutput');
+  const status   = document.getElementById('synStatus');
+  const panelEl  = document.getElementById('consensusPanel');
+  const listEl   = document.getElementById('consensusList');
+
+  out.className = 'ai-output';
+  out.textContent = '…';
+  panelEl.style.display  = mergeMode === 'sidebyside' ? '' : 'none';
+  listEl.innerHTML = '';
+  document.getElementById('intermediateSummaries').style.display = 'none';
+  setMultiStepProgress(`Running agent 1 of ${agentCount}…`, 0);
+
+  const prompt    = buildSynthPrompt(paperList, mode, incNotes);
+  const responses = [];
+  try {
+    for (let i = 0; i < agentCount; i++) {
+      const pct = Math.round((i / agentCount) * (mergeMode === 'merge' ? 75 : 100));
+      setMultiStepProgress(`Running agent ${i+1} of ${agentCount}…`, pct);
+      status.textContent = `Agent ${i+1}/${agentCount}…`;
+      const result = await callLLM(prompt, model, provider, apiKey, baseUrl);
+      responses.push(result);
+      if (mergeMode === 'sidebyside') {
+        listEl.innerHTML += `<details open style="background:var(--navy-2);border:1px solid var(--border);border-radius:5px;padding:0.45rem 0.75rem;font-size:0.78rem">
+          <summary style="cursor:pointer;color:var(--amber);font-weight:600">Agent ${i+1}</summary>
+          <div style="white-space:pre-wrap;color:var(--white);line-height:1.6;margin-top:0.5rem">${esc(result)}</div>
+        </details>`;
+      }
+    }
+    if (mergeMode === 'merge') {
+      setMultiStepProgress(`Merging ${agentCount} agent responses into consensus…`, 82);
+      status.textContent = 'Merging…';
+      const merged = await callLLM(buildMergePrompt(responses, mode, proj), model, provider, apiKey, baseUrl);
+      out.textContent = merged;
+    } else {
+      out.textContent = `${agentCount} agent responses shown above. Review each response and compare side by side.`;
+    }
+    setMultiStepProgress(null, 100);
+    status.textContent = '✓ Done';
+    setTimeout(() => status.textContent = '', 3000);
+  } catch (e) {
+    out.textContent = 'Error: ' + e.message + '\n\nCheck your API key and model name in Settings. If using a local model, make sure it is running.';
+    status.textContent = 'Error';
+    setMultiStepProgress(null, 0);
+  }
 }
 
 // ─────────────────────────────────────────

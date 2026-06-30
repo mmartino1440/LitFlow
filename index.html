@@ -219,6 +219,36 @@ blockquote cite { font-size: 0.72rem; color: var(--slate); font-style: normal; d
 }
 .provider-chip strong { color: var(--white); }
 
+/* ── CHANGELOG ── */
+#changelog { border-bottom: 1px solid var(--border); }
+.cl-list { margin-top: 2rem; display: flex; flex-direction: column; gap: 0; }
+.cl-entry {
+  display: grid; grid-template-columns: 140px 1fr;
+  gap: 0 2rem; padding: 1.5rem 0;
+  border-top: 1px solid var(--border);
+  align-items: start;
+}
+.cl-meta { padding-top: 0.15rem; }
+.cl-version {
+  font-family: 'DM Serif Display', Georgia, serif;
+  font-size: 1rem; color: var(--amber); line-height: 1.2;
+}
+.cl-date { font-size: 0.7rem; color: var(--slate); margin-top: 0.2rem; }
+.cl-badge {
+  display: inline-block; font-size: 0.58rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.1em;
+  padding: 2px 7px; border-radius: 10px; margin-top: 0.4rem;
+  background: rgba(245,166,35,0.12); color: var(--amber);
+  border: 1px solid rgba(245,166,35,0.3);
+}
+.cl-badge.fix { background: rgba(22,163,74,0.1); color: #4ade80; border-color: rgba(22,163,74,0.3); }
+.cl-body h4 { font-size: 0.88rem; font-weight: 600; color: var(--white); margin-bottom: 0.55rem; }
+.cl-body ul { list-style: none; display: flex; flex-direction: column; gap: 0.35rem; }
+.cl-body li { font-size: 0.82rem; color: var(--slate); padding-left: 1.1rem; position: relative; line-height: 1.55; }
+.cl-body li::before { content: '—'; position: absolute; left: 0; color: var(--border); }
+.cl-body li strong { color: var(--white); font-weight: 500; }
+@media (max-width: 700px) { .cl-entry { grid-template-columns: 1fr; gap: 0.5rem; } }
+
 /* ── CREATOR ── */
 #creator { background: var(--navy-2); border-bottom: 1px solid var(--border); }
 .creator-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; align-items: center; }
@@ -476,6 +506,73 @@ footer a { color: var(--amber); text-decoration: none; }
         <p>LitFlow is planned for submission to the Journal of Open Source Software (JOSS) alongside a methods paper on structured AI-assisted literature review in graduate science education. If you use this tool and would be willing to participate in a brief survey study, keep an eye on the Neuro-Humanist for updates.</p>
         <p style="margin-top:0.65rem">If LitFlow has been useful to your research, a citation will eventually be possible — and deeply appreciated.</p>
       </div>
+    </div>
+  </div>
+</section>
+
+<!-- CHANGELOG -->
+<section id="changelog">
+  <div class="inner">
+    <div class="section-label">Changelog</div>
+    <h2>What's New</h2>
+    <p class="lead">LitFlow is updated as the tool evolves with real research use.</p>
+    <div class="cl-list">
+
+      <div class="cl-entry">
+        <div class="cl-meta">
+          <div class="cl-version">v1.7</div>
+          <div class="cl-date">June 30, 2026</div>
+          <div class="cl-badge">new</div>
+        </div>
+        <div class="cl-body">
+          <h4>Multi-Agent Synthesis + Card Fix</h4>
+          <ul>
+            <li><strong>Batch + Condense</strong> — splits your library into chunks of 3–10 papers, summarizes each batch independently, then condenses all batch summaries into a final synthesis. Handles large libraries without hitting token limits in a single call.</li>
+            <li><strong>Multi-Agent Consensus</strong> — runs the same synthesis prompt 2–3 times independently, then either merges the responses into a single arbitrated output or displays them side by side for comparison.</li>
+            <li><strong>Token cost warnings</strong> — dynamic estimate shown before running any multi-step job; color-coded green/amber/red. Recommends Ollama for large libraries to avoid API charges.</li>
+            <li><strong>Card expand bug fixed</strong> — cards in the All Papers view now expand and collapse correctly. The bug was caused by duplicate DOM IDs when the same paper appeared in both the Up Next queue and the main list.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="cl-entry">
+        <div class="cl-meta">
+          <div class="cl-version">v1.6</div>
+          <div class="cl-date">June 2026</div>
+          <div class="cl-badge">new</div>
+        </div>
+        <div class="cl-body">
+          <h4>Disk Persistence &amp; Import Fixes</h4>
+          <ul>
+            <li><strong>Disk sync</strong> — connect a local JSON file via the File System Access API. LitFlow reads and writes directly to disk; no more relying on browser storage alone.</li>
+            <li><strong>Multi-file support</strong> — localStorage and IndexedDB keys are now namespaced per filename, so multiple independent LitFlow instances can run on the same origin without colliding.</li>
+            <li><strong>Paper delete</strong> — two-step confirmation before permanently removing a paper. Papers with notes require an extra acknowledge step.</li>
+            <li><strong>Import fix</strong> — JSON import now handles bare arrays, legacy numeric track IDs, and missing optional fields gracefully.</li>
+            <li><strong>API key clarity</strong> — settings panel now explains that Claude Pro / ChatGPT Plus subscriptions do not include API access, with direct links to the right billing pages.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="cl-entry">
+        <div class="cl-meta">
+          <div class="cl-version">v1.0 – v1.5</div>
+          <div class="cl-date">Early 2026</div>
+          <div class="cl-badge fix">foundation</div>
+        </div>
+        <div class="cl-body">
+          <h4>Core Tool</h4>
+          <ul>
+            <li>Paper library with structured note fields (design, methods, findings, relevance, open questions, scratch notes)</li>
+            <li>Reading tracks with custom names and colors; status workflow (To Read → Reading → Done → Skip)</li>
+            <li>One-shot LLM synthesis across five modes: literature review, gap analysis, methods summary, findings table, relevance to project</li>
+            <li>Per-paper AI actions (summarize, what to read next) directly from the card expand panel</li>
+            <li>Quick-add from any paper card; DOI auto-fill via Crossref; JSON import/export</li>
+            <li>Reading streak tracker, progress stats, and track-level completion bars</li>
+            <li>Anthropic, OpenAI, and local model (Ollama) support — no API key needed for local use</li>
+          </ul>
+        </div>
+      </div>
+
     </div>
   </div>
 </section>
