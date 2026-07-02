@@ -36,6 +36,17 @@ A paper describing this tool is planned for submission to the Journal of Open So
 
 ## Changelog
 
+### v1.8
+- Synthesis max output tokens are now configurable in Settings, with a per-model reference table (context window, max output ceiling) and Consensus-merge-specific guidance — fixes a bug where output was silently capped at 1,500 tokens for every model and method, which could truncate longer syntheses mid-sentence
+- Citation export — one-click RIS and BibTeX export for your whole library, plus a per-paper "Cite" button
+- Fixed: the Model field in Settings now correctly remembers a separate value per provider, so switching to a local Ollama model no longer risks sending it a Claude model string (or vice versa)
+
+### v1.7
+- Multi-Agent Consensus — run the same synthesis prompt 2–3 times independently, then either merge into a consensus or display responses side by side for comparison
+- Batch + Condense — splits your library into configurable chunks (3–10 papers), summarizes each batch independently, then condenses all summaries into a final synthesis — handles large libraries without hitting token limits in a single call
+- Dynamic token cost estimate shown before running any multi-step job, with Ollama recommended for large libraries to avoid API charges
+- Card expand bug fixed — papers in the All Papers view now expand and collapse correctly (duplicate DOM ID issue when the same paper appeared in both Up Next and the main list)
+
 ### v1.6
 - Disk persistence via File System Access API (Chrome/Edge 86+) — data survives clearing browser storage
 - Fixed quick-add to library bug (Enter key and Add → button were non-functional in Additional Readings)
