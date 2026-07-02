@@ -1,0 +1,8 @@
+{
+  "name": "litflow-tools",
+  "private": true,
+  "description": "Dev tooling for LitFlow (benchmark scripts) — not part of the shipped app.",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.68.0"
+  }
+}

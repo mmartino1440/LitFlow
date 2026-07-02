@@ -2,3 +2,10 @@ litflow-guide.html
 litflow-landing.html
 litflow-launch-guide.html
 *.DS_Store
+node_modules/
+litflow_live.html
+
+# Dev-only: contains real synthesized text and citations from unpublished
+# dissertation research (SEFL/PTSD/thalamus) — keep local, don't publish.
+benchmarks/
+test-data/
