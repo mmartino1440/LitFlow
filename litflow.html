@@ -771,7 +771,8 @@ header {
               1. Install Ollama from <a href="https://ollama.com" target="_blank" style="color:#4ade80">ollama.com</a><br>
               2. In a terminal: <code style="background:#0a3d1f;padding:1px 5px;border-radius:3px;font-size:0.72rem">ollama pull llama3</code> (or <code style="background:#0a3d1f;padding:1px 5px;border-radius:3px;font-size:0.72rem">mistral</code>, <code style="background:#0a3d1f;padding:1px 5px;border-radius:3px;font-size:0.72rem">phi3</code>, etc.)<br>
               3. Select <strong>Local (Ollama)</strong> below — Base URL defaults to <code style="background:#0a3d1f;padding:1px 5px;border-radius:3px;font-size:0.72rem">http://localhost:11434/v1</code><br>
-              4. <strong>Model name must match exactly what's running on that address</strong> — open <a href="http://localhost:11434/api/tags" target="_blank" style="color:#4ade80">localhost:11434/api/tags</a> in a new tab and copy a <code style="background:#0a3d1f;padding:1px 5px;border-radius:3px;font-size:0.72rem">"name"</code> value from the list into the Model field. (Don't trust <code style="background:#0a3d1f;padding:1px 5px;border-radius:3px;font-size:0.72rem">ollama list</code> in a terminal for this — if you also have Ollama running inside WSL/Docker, the terminal command and your browser can reach <em>different</em> Ollama servers and show different model lists.)
+              4. <strong>Model name must match exactly what's running on that address</strong> — open <a href="http://localhost:11434/api/tags" target="_blank" style="color:#4ade80">localhost:11434/api/tags</a> in a new tab and copy a <code style="background:#0a3d1f;padding:1px 5px;border-radius:3px;font-size:0.72rem">"name"</code> value from the list into the Model field. (Don't trust <code style="background:#0a3d1f;padding:1px 5px;border-radius:3px;font-size:0.72rem">ollama list</code> in a terminal for this — if you also have Ollama running inside WSL/Docker, the terminal command and your browser can reach <em>different</em> Ollama servers and show different model lists.)<br>
+              5. <strong>Model size vs. GPU memory:</strong> models much bigger than ~13–14B parameters often don't fully fit in a consumer GPU's VRAM. When that happens, Ollama offloads part of the model to CPU, which can make generation 10–50x slower — a large model can look "hung" when it's actually just grinding away for several minutes. Run <code style="background:#0a3d1f;padding:1px 5px;border-radius:3px;font-size:0.72rem">ollama ps</code> while a request is in flight to see the GPU/CPU split, and prefer a smaller model for interactive use.
             </span>
           </div>
           <div style="background:#1e1a00;border:1px solid #d97706;border-radius:6px;padding:0.6rem 0.85rem;margin-bottom:0.75rem;font-size:0.75rem;color:#fbbf24;line-height:1.5">
@@ -797,8 +798,56 @@ header {
             <input type="text" id="set-model" placeholder="e.g. claude-sonnet-4-6 or gpt-4o or llama3">
             <span class="hint">Claude: claude-sonnet-4-6 · OpenAI: gpt-4o · Ollama: llama3, mistral, etc.</span>
           </div>
+          <div class="setting-row">
+            <label>Synthesis max output tokens</label>
+            <input type="number" id="set-synth-maxtokens" min="256" step="256" placeholder="4096">
+            <span class="hint">Used for Standard synthesis, Batch condense, and each Consensus agent call. Too low truncates the output mid-sentence. There's no single "correct" number — model limits change too often for LitFlow to prescribe one, so set this yourself: <strong>rule of thumb</strong> — estimate your expected output length in words, multiply by ~1.3 for a rough token count, then add 30–50% buffer (e.g. a 600-word literature review section ≈ 780 tokens → set 1,000–1,500). Check the "Max out" column in the reference table below for the model's real ceiling. <strong>Claude-specific note:</strong> LitFlow sends Claude requests as a single non-streaming call, so values above roughly 16,000 risk the request stalling or timing out rather than failing fast — if you genuinely need Claude to produce that much output, raise the Request timeout below substantially, or keep this under ~16,000.</span>
+          </div>
+          <div class="setting-row">
+            <label>Consensus merge max output tokens</label>
+            <input type="number" id="set-merge-maxtokens" min="256" step="256" placeholder="8000">
+            <span class="hint">Used only for the final merge step of Consensus/multi-agent synthesis. This step shares its token budget with the model's internal reasoning, so it needs more headroom than a single-shot call — too low can produce empty or cut-off output. Raising this may also require raising the Request timeout below. The same ~16,000-token non-streaming caveat for Claude (see above) applies here too.</span>
+          </div>
+          <div style="margin:-0.15rem 0 0.6rem">
+            <button class="btn btn-outline" onclick="applyRecommendedTokens()">Use recommended Consensus merge value for current model</button>
+            <span id="applyTokensMsg" style="font-size:0.75rem;margin-left:0.5rem"></span>
+          </div>
+          <details style="background:var(--navy-2);border:1px solid var(--border);border-radius:5px;padding:0.5rem 0.85rem;font-size:0.78rem;margin-bottom:0.75rem">
+            <summary style="cursor:pointer;color:var(--amber);font-weight:600">📊 Model token-limit reference</summary>
+            <div style="margin-top:0.6rem">
+              <table style="width:100%;border-collapse:collapse;font-size:0.72rem;table-layout:fixed">
+                <thead>
+                  <tr style="text-align:left;color:var(--faint);border-bottom:1px solid var(--border)">
+                    <th style="padding:0.25rem 0.4rem 0.35rem 0;width:16%">Model</th>
+                    <th style="padding:0.25rem 0.4rem 0.35rem;width:20%">Context</th>
+                    <th style="padding:0.25rem 0.4rem 0.35rem;width:17%">Max out (ceiling)</th>
+                    <th style="padding:0.25rem 0.4rem 0.35rem;width:13%">Consensus</th>
+                    <th style="padding:0.25rem 0 0.35rem 0.4rem;width:34%">Notes</th>
+                  </tr>
+                </thead>
+                <tbody id="modelTokenGuideBody"></tbody>
+              </table>
+            </div>
+            <p style="margin-top:0.6rem;color:var(--faint);line-height:1.6">
+              Sources: <a href="https://platform.claude.com/docs/en/about-claude/models/overview" target="_blank" rel="noopener" style="color:var(--amber)">Anthropic model docs</a> ·
+              <a href="https://platform.openai.com/docs/models" target="_blank" rel="noopener" style="color:var(--amber)">OpenAI model docs</a> ·
+              <a href="https://ollama.com/library" target="_blank" rel="noopener" style="color:var(--amber)">Ollama model library</a> ·
+              <a href="https://github.com/ollama/ollama/blob/main/docs/api.md" target="_blank" rel="noopener" style="color:var(--amber)">Ollama API docs</a>.
+              For Ollama, "context window" is the model's architectural maximum — the server's actual running context (<code>num_ctx</code>) often defaults smaller unless configured, which limits input size independently of the output-token settings above.
+              No "recommended Synthesis tokens" column is shown here on purpose — that number depends on your expected output length, not the model, and a hardcoded per-model guess would go stale as limits change. Use "Max out" as the ceiling and the rule of thumb above the Synthesis field to pick your own value.
+            </p>
+          </details>
+          <div class="setting-row">
+            <label>Request timeout (seconds)</label>
+            <input type="number" id="set-timeout" min="10" step="10" placeholder="120">
+            <span class="hint">If the model hasn't responded within this many seconds, LitFlow gives up and shows an error instead of waiting forever. Raise this for very large local models; lower it to fail fast while testing.</span>
+          </div>
           <button class="btn btn-amber" onclick="saveSettings()" style="margin-top:0.25rem">Save Settings</button>
           <span id="saveMsg" style="font-size:0.75rem;color:var(--done);margin-left:0.5rem"></span>
+          <div style="margin-top:0.6rem">
+            <button class="btn btn-outline" onclick="testModel()" id="testModelBtn">⚡ Test Model</button>
+            <span id="testModelMsg" style="font-size:0.75rem;margin-left:0.5rem"></span>
+          </div>
         </div>
 
         <div class="settings-section">
@@ -917,7 +966,36 @@ const DEFAULT_SETTINGS = {
   baseUrl: 'http://localhost:11434/v1',
   model: 'claude-sonnet-4-6',
   modelByProvider: { anthropic: 'claude-sonnet-4-6', openai: 'gpt-4o', local: 'llama3' },
+  timeoutSec: 120,
+  synthMaxTokens: 4096,   // Standard, Batch condense (chunk + final), each Consensus agent call
+  mergeMaxTokens: 8000,   // Consensus merge step only — shares its budget with adaptive thinking,
+                          // needs more headroom than a single-shot call (see benchmarks/ANALYSIS-REPORT.md)
 };
+
+// Reference-only guidance for the Settings UI — not exhaustive, not live. Deliberately
+// does NOT prescribe a "Standard" recommended value — a model's practical context/output
+// ceiling changes too often for a hardcoded number to stay accurate. Instead this shows
+// each model's real max output ceiling (maxOutput) as a reference point, and the Settings
+// UI asks users to set their own Synthesis max output tokens using the rule-of-thumb
+// guidance there. `consensus` IS still curated here because it's not a context-window
+// guess — it's a fixed structural finding from LitFlow's own benchmark (the merge step
+// shares its token budget with the model's internal reasoning and needs real headroom
+// above a single-shot call, regardless of how large any given model's ceiling is).
+// Unrecognized/custom model strings fall back to GENERIC_MODEL_LIMITS. Verify current
+// values against the vendor docs linked in the Settings UI.
+const MODEL_TOKEN_GUIDE = {
+  'claude-sonnet-5':   { vendor: 'Anthropic', context: '1M tokens',   maxOutput: '128K tokens', consensus: 8000, note: 'LitFlow benchmark recommendation — best cost/speed/quality tradeoff' },
+  'claude-opus-4-8':   { vendor: 'Anthropic', context: '1M tokens',   maxOutput: '128K tokens', consensus: 8000, note: 'Higher ceiling than Sonnet 5 on some tasks, ~2.5x the cost' },
+  'claude-sonnet-4-6': { vendor: 'Anthropic', context: '1M tokens',   maxOutput: '128K tokens', consensus: 8000, note: 'Previous-generation Sonnet' },
+  'claude-haiku-4-5':  { vendor: 'Anthropic', context: '200K tokens', maxOutput: '64K tokens',  consensus: 6000, note: 'Fastest/cheapest Claude tier' },
+  'gpt-4o':            { vendor: 'OpenAI',    context: '128K tokens', maxOutput: '16K tokens',  consensus: 6000, note: '' },
+  'gpt-4o-mini':       { vendor: 'OpenAI',    context: '128K tokens', maxOutput: '16K tokens',  consensus: 4096, note: '' },
+  'llama3':            { vendor: 'Ollama', context: '8K tokens',                          maxOutput: 'No fixed cap (bounded by context)', consensus: 3072, note: 'Also raise Request timeout below — local models are far slower than cloud' },
+  'llama3.1':           { vendor: 'Ollama', context: '128K tokens (check server num_ctx)', maxOutput: 'No fixed cap (bounded by context)', consensus: 3072, note: 'Fabricated a citation in LitFlow benchmark testing — verify output' },
+  'hermes3':           { vendor: 'Ollama', context: '128K tokens (check server num_ctx)', maxOutput: 'No fixed cap (bounded by context)', consensus: 3072, note: '⚠ Fabricated 7 citations in LitFlow benchmark testing — not recommended as default' },
+  'phi4':              { vendor: 'Ollama', context: '16K tokens',                         maxOutput: 'No fixed cap (bounded by context)', consensus: 3072, note: 'Slowest local model tested (~1.6–1.9 tok/s), zero fabrication observed — raise timeout to 20+ min' },
+};
+const GENERIC_MODEL_LIMITS = { consensus: 8000 }; // fallback for unrecognized/custom model strings
 
 // ─────────────────────────────────────────
 // STATE
@@ -1501,9 +1579,44 @@ function renderSettings() {
   document.getElementById('set-apikey').value   = settings.apiKey || '';
   document.getElementById('set-baseurl').value  = settings.baseUrl || '';
   document.getElementById('set-model').value    = settings.model || '';
+  document.getElementById('set-synth-maxtokens').value = settings.synthMaxTokens || DEFAULT_SETTINGS.synthMaxTokens;
+  document.getElementById('set-merge-maxtokens').value = settings.mergeMaxTokens || DEFAULT_SETTINGS.mergeMaxTokens;
+  document.getElementById('set-timeout').value  = settings.timeoutSec || DEFAULT_SETTINGS.timeoutSec;
   selectProvider(settings.provider || 'anthropic', false);
+  renderModelTokenGuideTable();
   renderTrackEditor();
   renderTrackSelects();
+}
+
+function renderModelTokenGuideTable() {
+  const body = document.getElementById('modelTokenGuideBody');
+  if (!body) return;
+  body.innerHTML = Object.entries(MODEL_TOKEN_GUIDE).map(([name, g]) => `
+    <tr style="border-bottom:1px solid var(--border);color:var(--white)">
+      <td style="padding:0.3rem 0.4rem 0.3rem 0;word-break:break-word"><code>${esc(name)}</code><br><span style="color:var(--faint)">${esc(g.vendor)}</span></td>
+      <td style="padding:0.3rem 0.4rem">${esc(g.context)}</td>
+      <td style="padding:0.3rem 0.4rem">${esc(g.maxOutput)}</td>
+      <td style="padding:0.3rem 0.4rem">${g.consensus}</td>
+      <td style="padding:0.3rem 0 0.3rem 0.4rem;color:var(--faint)">${esc(g.note || '')}</td>
+    </tr>`).join('');
+}
+
+// Only fills the Consensus merge field. Synthesis max output tokens is left for the user
+// to set themselves (see the rule-of-thumb hint on that field) — a per-model "Standard"
+// recommendation would just be a guess that goes stale as model limits change. Consensus's
+// value isn't that kind of guess: it's a fixed LitFlow benchmark finding (the merge step
+// shares its token budget with the model's internal reasoning), so it's safe to prefill.
+function applyRecommendedTokens() {
+  const model = document.getElementById('set-model').value.trim();
+  const guide = MODEL_TOKEN_GUIDE[model];
+  const target = guide || GENERIC_MODEL_LIMITS;
+  document.getElementById('set-merge-maxtokens').value = target.consensus;
+  const msg = document.getElementById('applyTokensMsg');
+  msg.style.color = guide ? 'var(--done)' : '#fbbf24';
+  msg.textContent = guide
+    ? `Applied recommended Consensus merge value for ${model}. Set Synthesis max output tokens yourself using the guidance above — it depends on your expected output length, not the model.`
+    : `No specific guidance for "${model || '(empty)'}" — applied the generic Consensus merge default (${GENERIC_MODEL_LIMITS.consensus}). See the reference table below.`;
+  setTimeout(() => msg.textContent = '', 8000);
 }
 
 function renderTrackEditor() {
@@ -1574,6 +1687,9 @@ function saveSettings() {
   settings.apiKey   = document.getElementById('set-apikey').value.trim();
   settings.baseUrl  = document.getElementById('set-baseurl').value.trim();
   settings.model    = document.getElementById('set-model').value.trim();
+  settings.synthMaxTokens = Math.max(256, parseInt(document.getElementById('set-synth-maxtokens').value) || DEFAULT_SETTINGS.synthMaxTokens);
+  settings.mergeMaxTokens = Math.max(256, parseInt(document.getElementById('set-merge-maxtokens').value) || DEFAULT_SETTINGS.mergeMaxTokens);
+  settings.timeoutSec = parseInt(document.getElementById('set-timeout').value) || DEFAULT_SETTINGS.timeoutSec;
   if (settings.model) settings.modelByProvider[settings.provider] = settings.model;
   save();
   document.getElementById('saveMsg').textContent = 'Saved ✓';
@@ -1824,7 +1940,7 @@ async function runSynthesize() {
     out.textContent = '⏳ Sending to ' + (provider === 'local' ? 'local model' : model) + '…';
     status.textContent = `Using ${relevant.length} papers…`;
     try {
-      const result = await callLLM(prompt, model, provider, apiKey, baseUrl);
+      const result = await callLLM(prompt, model, provider, apiKey, baseUrl, { onChunk: chunk => { out.textContent = chunk; }, maxTokens: settings.synthMaxTokens });
       out.textContent = result;
       status.textContent = '✓ Done';
       setTimeout(() => status.textContent = '', 3000);
@@ -1861,43 +1977,123 @@ async function runPaperAI(id, type) {
     outEl.textContent = 'API key not set. Go to ⚙ Settings.'; return;
   }
   try {
-    const result = await callLLM(prompt, model, provider, apiKey, baseUrl);
+    const result = await callLLM(prompt, model, provider, apiKey, baseUrl, { onChunk: chunk => { outEl.textContent = chunk; } });
     outEl.textContent = result;
   } catch (e) {
     outEl.textContent = 'Error: ' + e.message;
   }
 }
 
-async function callLLM(prompt, model, provider, apiKey, baseUrl) {
+// Parses an OpenAI-compatible streamed chat completion (newline-delimited
+// "data: {...}" chunks) and reports the accumulated text via onChunk as it arrives.
+async function readStreamedChat(response, onChunk) {
+  const reader  = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '', full = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop();
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('data:')) continue;
+      const data = trimmed.slice(5).trim();
+      if (data === '[DONE]') continue;
+      try {
+        const delta = JSON.parse(data).choices?.[0]?.delta?.content || '';
+        if (delta) { full += delta; onChunk(full); }
+      } catch (e) { /* ignore malformed/partial chunk */ }
+    }
+  }
+  return full;
+}
+
+// onChunk (optional) receives the accumulated text-so-far as it streams in — only
+// used for the local/Ollama provider, since that's where slow/oversized models
+// otherwise leave the user staring at a blank "Sending…" with no feedback.
+async function callLLM(prompt, model, provider, apiKey, baseUrl, opts = {}) {
+  const { onChunk, maxTokens } = opts;
+  const timeoutSec = settings.timeoutSec || DEFAULT_SETTINGS.timeoutSec;
+  const tokens = maxTokens || settings.synthMaxTokens || DEFAULT_SETTINGS.synthMaxTokens;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutSec * 1000);
   let url, headers, body;
 
-  if (provider === 'anthropic') {
-    url = 'https://api.anthropic.com/v1/messages';
-    headers = {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-    };
-    body = JSON.stringify({ model, max_tokens: 1500, messages: [{ role: 'user', content: prompt }] });
-    const r = await fetch(url, { method: 'POST', headers, body });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error?.message || JSON.stringify(d));
-    return d.content[0].text;
+  try {
+    if (provider === 'anthropic') {
+      url = 'https://api.anthropic.com/v1/messages';
+      headers = {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      };
+      body = JSON.stringify({ model, max_tokens: tokens, messages: [{ role: 'user', content: prompt }] });
+      const r = await fetch(url, { method: 'POST', headers, body, signal: controller.signal });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error?.message || JSON.stringify(d));
+      return d.content[0].text;
 
-  } else if (provider === 'openai' || provider === 'local') {
-    url = provider === 'local'
-      ? (baseUrl || 'http://localhost:11434/v1') + '/chat/completions'
-      : 'https://api.openai.com/v1/chat/completions';
-    headers = { 'Content-Type': 'application/json' };
-    if (apiKey) headers['Authorization'] = 'Bearer ' + apiKey;
-    body = JSON.stringify({ model, max_tokens: 1500, messages: [{ role: 'user', content: prompt }] });
-    const r = await fetch(url, { method: 'POST', headers, body });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error?.message || JSON.stringify(d));
-    return d.choices[0].message.content;
+    } else if (provider === 'openai' || provider === 'local') {
+      url = provider === 'local'
+        ? (baseUrl || 'http://localhost:11434/v1') + '/chat/completions'
+        : 'https://api.openai.com/v1/chat/completions';
+      headers = { 'Content-Type': 'application/json' };
+      if (apiKey) headers['Authorization'] = 'Bearer ' + apiKey;
+      const useStream = provider === 'local' && typeof onChunk === 'function';
+      body = JSON.stringify({ model, max_tokens: tokens, stream: useStream, messages: [{ role: 'user', content: prompt }] });
+      const r = await fetch(url, { method: 'POST', headers, body, signal: controller.signal });
+      if (useStream) {
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({}));
+          throw new Error(d.error?.message || `HTTP ${r.status}`);
+        }
+        return await readStreamedChat(r, onChunk);
+      }
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error?.message || JSON.stringify(d));
+      return d.choices[0].message.content;
+    }
+    throw new Error('Unknown provider: ' + provider);
+
+  } catch (e) {
+    if (e.name === 'AbortError') {
+      throw new Error(`Request timed out after ${timeoutSec}s. If you're using a local model, it may be too large to fit in GPU memory — check "ollama ps" for CPU offload, or try a smaller model. You can raise this timeout in Settings.`);
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
   }
-  throw new Error('Unknown provider: ' + provider);
+}
+
+async function testModel() {
+  const { model, provider, apiKey, baseUrl } = {
+    model:    document.getElementById('set-model').value.trim(),
+    provider: settings.provider,
+    apiKey:   document.getElementById('set-apikey').value.trim(),
+    baseUrl:  document.getElementById('set-baseurl').value.trim(),
+  };
+  const msgEl = document.getElementById('testModelMsg');
+  const btn   = document.getElementById('testModelBtn');
+  if (!model) { msgEl.textContent = 'Enter a model name first.'; msgEl.style.color = '#f87171'; return; }
+  if (!apiKey && provider !== 'local') { msgEl.textContent = 'Enter an API key first.'; msgEl.style.color = '#f87171'; return; }
+
+  btn.disabled = true;
+  msgEl.style.color = 'var(--faint)';
+  msgEl.textContent = 'Testing…';
+  const started = performance.now();
+  try {
+    await callLLM('Reply with just the word OK.', model, provider, apiKey, baseUrl);
+    const secs = ((performance.now() - started) / 1000).toFixed(1);
+    msgEl.style.color = '#86efac';
+    msgEl.textContent = `✓ Responded in ${secs}s`;
+  } catch (e) {
+    msgEl.style.color = '#f87171';
+    msgEl.textContent = 'Error: ' + e.message;
+  }
+  btn.disabled = false;
 }
 
 function copySynOutput() {
@@ -2014,7 +2210,7 @@ async function runBatchCondense(paperList, mode, chunkSize, showIntermediate) {
       setMultiStepProgress(`Step 1 of 2 — Summarizing batch ${i+1} of ${chunks.length}…`, Math.round((i / chunks.length) * 60));
       status.textContent = `Batch ${i+1}/${chunks.length}…`;
       const prompt  = buildChunkSummaryPrompt(chunks[i], proj, incNotes);
-      const summary = await callLLM(prompt, model, provider, apiKey, baseUrl);
+      const summary = await callLLM(prompt, model, provider, apiKey, baseUrl, { maxTokens: settings.synthMaxTokens });
       summaries.push(summary);
       if (showIntermediate) {
         const titles = chunks[i].map(p => p.title).join(', ');
@@ -2027,7 +2223,7 @@ async function runBatchCondense(paperList, mode, chunkSize, showIntermediate) {
     }
     setMultiStepProgress(`Step 2 of 2 — Condensing ${chunks.length} batch summaries…`, 65);
     status.textContent = 'Condensing…';
-    const result = await callLLM(buildCondensePrompt(summaries, mode, proj), model, provider, apiKey, baseUrl);
+    const result = await callLLM(buildCondensePrompt(summaries, mode, proj), model, provider, apiKey, baseUrl, { maxTokens: settings.synthMaxTokens });
     out.textContent = result;
     setMultiStepProgress(null, 100);
     status.textContent = '✓ Done';
@@ -2062,7 +2258,7 @@ async function runConsensus(paperList, mode, agentCount, mergeMode) {
       const pct = Math.round((i / agentCount) * (mergeMode === 'merge' ? 75 : 100));
       setMultiStepProgress(`Running agent ${i+1} of ${agentCount}…`, pct);
       status.textContent = `Agent ${i+1}/${agentCount}…`;
-      const result = await callLLM(prompt, model, provider, apiKey, baseUrl);
+      const result = await callLLM(prompt, model, provider, apiKey, baseUrl, { maxTokens: settings.synthMaxTokens });
       responses.push(result);
       if (mergeMode === 'sidebyside') {
         listEl.innerHTML += `<details open style="background:var(--navy-2);border:1px solid var(--border);border-radius:5px;padding:0.45rem 0.75rem;font-size:0.78rem">
@@ -2074,7 +2270,7 @@ async function runConsensus(paperList, mode, agentCount, mergeMode) {
     if (mergeMode === 'merge') {
       setMultiStepProgress(`Merging ${agentCount} agent responses into consensus…`, 82);
       status.textContent = 'Merging…';
-      const merged = await callLLM(buildMergePrompt(responses, mode, proj), model, provider, apiKey, baseUrl);
+      const merged = await callLLM(buildMergePrompt(responses, mode, proj), model, provider, apiKey, baseUrl, { maxTokens: settings.mergeMaxTokens });
       out.textContent = merged;
     } else {
       out.textContent = `${agentCount} agent responses shown above. Review each response and compare side by side.`;
