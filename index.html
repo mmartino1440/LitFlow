@@ -520,6 +520,23 @@ footer a { color: var(--amber); text-decoration: none; }
 
       <div class="cl-entry">
         <div class="cl-meta">
+          <div class="cl-version">v1.9</div>
+          <div class="cl-date">July 7, 2026</div>
+          <div class="cl-badge fix">fix</div>
+        </div>
+        <div class="cl-body">
+          <h4>Data Safety: Reconnect &amp; Import No Longer Overwrite Silently</h4>
+          <ul>
+            <li><strong>Fixed a data-loss bug</strong> — reconnecting a data file (or reopening LitFlow with one already connected) could silently overwrite newer unsaved local changes with an older version from disk. There was no warning and no way back.</li>
+            <li><strong>Conflict detection</strong> — reconnecting now compares timestamps, and if your local session has changes the file on disk doesn't, you're prompted to choose which version to keep instead of losing anything automatically.</li>
+            <li><strong>Automatic recovery snapshot</strong> — before any wholesale overwrite (conflict resolution, JSON import, reset), your prior data is saved to a recovery slot. A "Restore previous session" option now appears in Settings → Data whenever there's something to recover.</li>
+            <li><strong>Import confirmation</strong> — importing a JSON backup now asks before replacing your existing library instead of doing it immediately.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="cl-entry">
+        <div class="cl-meta">
           <div class="cl-version">v1.7</div>
           <div class="cl-date">June 30, 2026</div>
           <div class="cl-badge">new</div>
