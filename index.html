@@ -520,8 +520,8 @@ footer a { color: var(--amber); text-decoration: none; }
 
       <div class="cl-entry">
         <div class="cl-meta">
-          <div class="cl-version">v1.9</div>
-          <div class="cl-date">July 7, 2026</div>
+          <div class="cl-version">v1.8.1</div>
+          <div class="cl-date">July 8, 2026</div>
           <div class="cl-badge fix">fix</div>
         </div>
         <div class="cl-body">
@@ -531,6 +531,22 @@ footer a { color: var(--amber); text-decoration: none; }
             <li><strong>Conflict detection</strong> — reconnecting now compares timestamps, and if your local session has changes the file on disk doesn't, you're prompted to choose which version to keep instead of losing anything automatically.</li>
             <li><strong>Automatic recovery snapshot</strong> — before any wholesale overwrite (conflict resolution, JSON import, reset), your prior data is saved to a recovery slot. A "Restore previous session" option now appears in Settings → Data whenever there's something to recover.</li>
             <li><strong>Import confirmation</strong> — importing a JSON backup now asks before replacing your existing library instead of doing it immediately.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="cl-entry">
+        <div class="cl-meta">
+          <div class="cl-version">v1.8</div>
+          <div class="cl-date">July 2026</div>
+          <div class="cl-badge">new</div>
+        </div>
+        <div class="cl-body">
+          <h4>Citation Export + Configurable Synthesis Limits</h4>
+          <ul>
+            <li><strong>Citation export</strong> — one-click RIS and BibTeX export for your whole library, plus a per-paper "Cite" button.</li>
+            <li><strong>Configurable synthesis token limits</strong> — max output tokens are now adjustable in Settings, with a per-model reference table (context window, max output ceiling). Fixes a bug where output was silently capped at 1,500 tokens for every model and method, which could truncate longer syntheses mid-sentence.</li>
+            <li><strong>Model field fix</strong> — Settings now remembers a separate Model value per provider, so switching to a local Ollama model no longer risks sending it a Claude model string (or vice versa).</li>
           </ul>
         </div>
       </div>

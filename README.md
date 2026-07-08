@@ -36,6 +36,12 @@ A paper describing this tool is planned for submission to the Journal of Open So
 
 ## Changelog
 
+### v1.8.1
+- Fixed a data-loss bug: reconnecting a data file (or reopening LitFlow with one already connected) could silently overwrite newer unsaved local changes with an older version from disk, with no warning and no way back
+- Reconnect now detects the conflict (compares save timestamps) and prompts you to choose which version to keep instead of overwriting automatically
+- Added an automatic recovery snapshot before any wholesale overwrite (conflict resolution, JSON import, reset) — a "Restore previous session" option appears in Settings → Data whenever there's something to recover
+- JSON import now asks for confirmation before replacing an existing library
+
 ### v1.8
 - Synthesis max output tokens are now configurable in Settings, with a per-model reference table (context window, max output ceiling) and Consensus-merge-specific guidance — fixes a bug where output was silently capped at 1,500 tokens for every model and method, which could truncate longer syntheses mid-sentence
 - Citation export — one-click RIS and BibTeX export for your whole library, plus a per-paper "Cite" button
