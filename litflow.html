@@ -1612,6 +1612,7 @@ function renderAll() {
     }
     return true;
   });
+  filtered.sort((a, b) => (a.title || '').localeCompare(b.title || '', undefined, { sensitivity: 'base' }));
 
   const el = document.getElementById('allList');
   if (!filtered.length) { el.innerHTML = '<div class="empty-state">No papers match the current filters.</div>'; return; }
