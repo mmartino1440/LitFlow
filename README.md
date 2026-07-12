@@ -36,6 +36,10 @@ A paper describing this tool is planned for submission to the Journal of Open So
 
 ## Changelog
 
+### v1.9
+- All Papers list now sorts alphabetically by title (case-insensitive) by default, on top of the existing track/status/type filters and search
+- Paper titles are now editable after creation — new Title field in each paper's expand panel, no more deleting and re-adding a paper to fix a typo
+
 ### v1.8.1
 - Fixed a data-loss bug: reconnecting a data file (or reopening LitFlow with one already connected) could silently overwrite newer unsaved local changes with an older version from disk, with no warning and no way back
 - Reconnect now detects the conflict (compares save timestamps) and prompts you to choose which version to keep instead of overwriting automatically
