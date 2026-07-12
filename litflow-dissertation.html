@@ -1619,16 +1619,20 @@ function renderAll() {
   el.innerHTML = filtered.map(p => paperCardHTML(p, true)).join('');
 }
 
-function paperCardHTML(p, withExpand) {
-  const t = tracks.find(x => x.id === p.track) || { name: 'Untracked', color: '#94a3b8' };
-  const titleEl = p.link
+function titleMarkup(p) {
+  return p.link
     ? `<a href="${p.link}" target="_blank" onclick="event.stopPropagation()">${esc(p.title)}</a>`
     : esc(p.title);
+}
+
+function paperCardHTML(p, withExpand) {
+  const t = tracks.find(x => x.id === p.track) || { name: 'Untracked', color: '#94a3b8' };
+  const titleEl = titleMarkup(p);
   const prefix = withExpand ? 'all' : 'today';
   return `<div class="paper-card ${p.status}" id="pc-${prefix}-${p.id}" onclick="this.classList.toggle('open')">
     <div class="paper-title-row">
       <div style="flex:1">
-        <div class="paper-title-text">${titleEl}</div>
+        <div class="paper-title-text" id="pt-${prefix}-${p.id}">${titleEl}</div>
         <div class="paper-meta-row">${esc(p.citation || 'Citation needed')}${p.dateCompleted ? ' · ' + p.dateCompleted.split('T')[0] : ''}</div>
         <div class="paper-tags">
           <span class="tag" style="background:${t.color}20;color:${t.color};border-color:${t.color}40">${t.name}</span>
@@ -1645,6 +1649,7 @@ function expandContent(p) {
   const proj = settings.project || 'Your Project';
   return `<div style="margin-top:0.75rem" onclick="event.stopPropagation()">
     <div class="note-grid">
+      <div class="nf full"><label>Title</label><input type="text" value="${esc(p.title)}" oninput="updateTitle('${p.id}',this.value)"></div>
       <div class="nf"><label>Citation</label><input type="text" value="${esc(p.citation)}" oninput="updateF('${p.id}','citation',this.value)"></div>
       <div class="nf"><label>Link / DOI</label><input type="text" value="${esc(p.link)}" oninput="updateF('${p.id}','link',this.value)"></div>
       <div class="nf"><label>Track</label>
@@ -1899,6 +1904,13 @@ function addPaper() {
 function updateF(id, field, val) {
   const p = papers.find(x => x.id === id);
   if (p) { p[field] = val; save(); }
+}
+
+function updateTitle(id, val) {
+  updateF(id, 'title', val);
+  const p = papers.find(x => x.id === id);
+  const el = document.getElementById('pt-all-' + id);
+  if (p && el) el.innerHTML = titleMarkup(p);
 }
 
 function setStatus(id, status) {
