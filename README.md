@@ -66,6 +66,13 @@ A paper describing this tool is planned for submission to the Journal of Open So
 ### v1.5
 - Initial public release
 
+## MCP companion
+
+For connecting a library to an MCP-capable model (Claude Code, Claude Desktop, any MCP client)
+instead of the app's built-in AI buttons, see [`mcp-server/`](mcp-server/) — a self-contained,
+SQLite-backed MCP server with a bridge script to move a library between it and this app's own
+JSON export/import. Optional; the app works fully standalone without it.
+
 ## License
 
 MIT

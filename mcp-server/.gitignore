@@ -1,0 +1,19 @@
+# Local database — never commit a real library
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Env / secrets (needs none today, but guard anyway)
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Exported libraries (may contain personal reading data)
+export/
+*.library.json
+*.litflow-import.json

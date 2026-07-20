@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>litflow MCP — library viewer</title>
+<style>
+  :root {
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, "Cascadia Code", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+    --ground: #F1F3F4; --surface: #FFFFFF; --surface-2: #F5F7F8;
+    --ink: #182229; --muted: #58666F; --faint: #8A97A0; --hairline: #E0E4E7;
+    --accent: #0C7C79; --accent-ink: #0a615f;
+    --todo: #9A6A12; --todo-bg: #F6ECD6;
+    --reading: #0C7C79; --reading-bg: #DBEFEE;
+    --done: #2E7D4F; --done-bg: #E4F1E9;
+    --skip: #8A97A0; --skip-bg: #ECEFF1;
+    --shadow: 0 1px 2px rgba(24,34,41,.04), 0 6px 18px rgba(24,34,41,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #0D1319; --surface: #151D25; --surface-2: #1B242D;
+      --ink: #E6EBEF; --muted: #97A4B0; --faint: #66727D; --hairline: #27323C;
+      --accent: #3DC8C0; --accent-ink: #6BD8D2;
+      --todo: #D6A94A; --todo-bg: #2A2213;
+      --reading: #3DC8C0; --reading-bg: #10262A;
+      --done: #56C083; --done-bg: #14261C;
+      --skip: #66727D; --skip-bg: #1E2831;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35);
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--ground); color: var(--ink); font-family: var(--font-sans); line-height: 1.55; }
+  .wrap { max-width: 54rem; margin: 0 auto; padding: 2rem 1.2rem 5rem; }
+
+  header.top { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-end; justify-content: space-between; }
+  .brand { font-family: var(--font-mono); font-weight: 600; font-size: .8rem; letter-spacing: .12em; text-transform: uppercase; color: var(--accent-ink); }
+  @media (prefers-color-scheme: dark) { .brand { color: var(--accent); } }
+  h1 { font-size: 1.7rem; margin: .2rem 0 0; letter-spacing: -.01em; text-wrap: balance; }
+
+  .controls { display: flex; gap: .5rem; flex-wrap: wrap; }
+  button, label.file {
+    font: inherit; font-size: .85rem; cursor: pointer; border: 1px solid var(--hairline);
+    background: var(--surface); color: var(--ink); padding: .45rem .8rem; border-radius: 8px;
+    box-shadow: var(--shadow); display: inline-flex; align-items: center; gap: .4rem;
+  }
+  button:hover, label.file:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  @media (prefers-color-scheme: dark) { button.primary { color: #06201f; } }
+  input[type=file] { display: none; }
+
+  .stats { display: flex; flex-wrap: wrap; gap: .6rem; margin: 1.4rem 0 .4rem; font-family: var(--font-mono); }
+  .stat { background: var(--surface); border: 1px solid var(--hairline); border-radius: 9px; padding: .5rem .8rem; box-shadow: var(--shadow); }
+  .stat b { font-size: 1.15rem; } .stat span { color: var(--muted); font-size: .78rem; display: block; letter-spacing: .04em; }
+
+  .barwrap { height: 8px; border-radius: 999px; overflow: hidden; display: flex; margin: 1rem 0 2rem; border: 1px solid var(--hairline); }
+  .barwrap i { display: block; height: 100%; }
+
+  h2.sec { font-family: var(--font-mono); font-size: .95rem; letter-spacing: .02em; margin: 2rem 0 .8rem; display: flex; align-items: center; gap: .6rem; }
+  h2.sec::after { content: ""; flex: 1; height: 1px; background: var(--hairline); }
+  .track-name { font-weight: 600; }
+
+  .paper { background: var(--surface); border: 1px solid var(--hairline); border-radius: 11px; box-shadow: var(--shadow); margin-bottom: .7rem; overflow: hidden; }
+  .paper > summary { list-style: none; cursor: pointer; padding: .9rem 1.1rem; display: flex; gap: .8rem; align-items: baseline; }
+  .paper > summary::-webkit-details-marker { display: none; }
+  .paper > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .p-title { font-weight: 600; flex: 1; }
+  .p-cite { color: var(--muted); font-size: .82rem; font-family: var(--font-mono); }
+  .pill { font-family: var(--font-mono); font-size: .64rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; padding: .18rem .45rem; border-radius: 5px; white-space: nowrap; flex: none; }
+  .pill.todo { color: var(--todo); background: var(--todo-bg); }
+  .pill.reading { color: var(--reading); background: var(--reading-bg); }
+  .pill.done { color: var(--done); background: var(--done-bg); }
+  .pill.skip { color: var(--skip); background: var(--skip-bg); }
+
+  .detail { padding: 0 1.1rem 1.1rem; border-top: 1px solid var(--hairline); margin-top: .1rem; }
+  .detail dl { display: grid; grid-template-columns: max-content 1fr; gap: .35rem 1rem; margin: .9rem 0 0; }
+  .detail dt { font-family: var(--font-mono); font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); padding-top: .1rem; }
+  .detail dd { margin: 0; }
+  .detail .id { font-family: var(--font-mono); font-size: .74rem; color: var(--faint); margin-top: .8rem; }
+  .detail a { color: var(--accent-ink); }
+  @media (prefers-color-scheme: dark) { .detail a { color: var(--accent); } }
+  .empty-field { color: var(--faint); font-style: italic; }
+  .tag { display: inline-block; font-family: var(--font-mono); font-size: .68rem; background: var(--surface-2); border: 1px solid var(--hairline); border-radius: 5px; padding: .05rem .4rem; margin: 0 .3rem .2rem 0; color: var(--muted); }
+
+  .hint { color: var(--muted); font-size: .88rem; margin-top: .5rem; }
+  footer { margin-top: 3rem; padding-top: 1.2rem; border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: .74rem; color: var(--faint); }
+  footer a { color: inherit; }
+  .toast { position: fixed; bottom: 1.2rem; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--ground); padding: .6rem 1rem; border-radius: 8px; font-size: .85rem; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+  @media (max-width: 34rem) { .detail dl { grid-template-columns: 1fr; gap: .1rem .5rem; } .detail dt { margin-top: .5rem; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <div class="brand">litflow · mcp companion</div>
+      <h1 id="libName">Example Library</h1>
+    </div>
+    <div class="controls">
+      <label class="file">Load library JSON<input type="file" id="fileInput" accept="application/json,.json"></label>
+      <button id="copyBtn">Copy digest for a model</button>
+    </div>
+  </header>
+
+  <div class="stats" id="stats"></div>
+  <div class="barwrap" id="bar"></div>
+
+  <div id="content"></div>
+
+  <p class="hint" id="hint"></p>
+
+  <footer>
+    litflow MCP companion · open-source (MIT) · read-only viewer for a database managed by <code>server.py</code> ·
+    load an export from <code>export.py</code> here, or the main app's own library via <code>bridge.py</code>.
+  </footer>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+// Embedded example so the page renders on open. Same shape as `python export.py` produces.
+const EXAMPLE_DATA = {
+  "library": { "id": "example", "name": "Example Library — Sleep & Memory" },
+  "tracks": [
+    { "id": "t1", "name": "Mechanisms", "color": "#0C7C79" },
+    { "id": "t2", "name": "Behavioral studies", "color": "#9A6A12" }
+  ],
+  "papers": [
+    { "id": "hippocampal-replay-2019", "title": "Hippocampal replay during slow-wave sleep", "link": "https://example.org/replay-2019", "citation": "Rivera et al., 2019", "track": "t1", "type": "paper", "status": "done", "curr_order": 1, "design": "Rodent electrophysiology, n=12.", "methods": "Tetrode recordings across learning and subsequent sleep.", "findings": "Sequences active during learning reactivated in compressed form during SWS.", "relevance": "Core mechanistic evidence for sleep-dependent consolidation.", "questions": "Does replay fidelity predict next-day recall?", "notes": "Cited by nearly everything downstream; good anchor paper.", "tags": ["mechanism", "anchor-paper"] },
+    { "id": "spindles-declarative-2021", "title": "Sleep spindles and declarative memory gains", "link": "https://example.org/spindles-2021", "citation": "Okafor & Lindqvist, 2021", "track": "t1", "type": "paper", "status": "done", "curr_order": 2, "design": "Human polysomnography + word-pair recall, n=40.", "methods": "Overnight PSG; spindle density correlated with morning recall improvement.", "findings": "Spindle density predicted overnight recall gains (r=0.46).", "relevance": "Bridges the rodent replay work to human declarative memory.", "questions": "Is the effect causal or a correlate of sleep depth?", "notes": "", "tags": ["human", "EEG"] },
+    { "id": "nap-vs-wake-2022", "title": "Daytime naps versus quiet wakefulness for retention", "link": "https://example.org/nap-2022", "citation": "Delgado et al., 2022", "track": "t2", "type": "paper", "status": "reading", "curr_order": 1, "design": "Behavioral, within-subjects crossover, n=28.", "methods": "90-min nap vs. quiet wake; retention tested at 24h.", "findings": "", "relevance": "Directly tests a practical intervention.", "questions": "How does nap timing relative to learning matter?", "notes": "Halfway through — findings section still to summarize.", "tags": ["behavioral"] },
+    { "id": "targeted-reactivation-2023", "title": "Targeted memory reactivation: a review", "link": "https://example.org/tmr-2023", "citation": "Brandt, 2023", "track": "t2", "type": "review", "status": "todo", "curr_order": 2, "design": "", "methods": "", "findings": "", "relevance": "", "questions": "", "notes": "Queued — good candidate for the synthesis once read.", "tags": ["review"] }
+  ]
+};
+
+const STATUS_ORDER = ["reading", "todo", "done", "skip"];
+const STATUS_LABEL = { todo: "To read", reading: "Reading", done: "Done", skip: "Skipped" };
+const DETAIL_FIELDS = [["design","Design"],["methods","Methods"],["findings","Findings"],["relevance","Relevance"],["questions","Questions"],["notes","Notes"]];
+let DATA = EXAMPLE_DATA;
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => (s ?? "").toString().replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function render() {
+  const { library, tracks, papers } = DATA;
+  $("libName").textContent = library?.name || "Untitled library";
+  document.title = `litflow MCP — ${library?.name || "library"}`;
+
+  const counts = { done: 0, reading: 0, todo: 0, skip: 0 };
+  papers.forEach(p => { if (counts[p.status] !== undefined) counts[p.status]++; });
+
+  $("stats").innerHTML = [
+    ["Total", papers.length, "var(--ink)"],
+    ["Done", counts.done, "var(--done)"],
+    ["Reading", counts.reading, "var(--reading)"],
+    ["To read", counts.todo, "var(--todo)"],
+  ].map(([label, n, c]) => `<div class="stat"><b style="color:${c}">${n}</b><span>${label}</span></div>`).join("");
+
+  const total = papers.length || 1;
+  $("bar").innerHTML = ["done", "reading", "todo", "skip"].map(s => {
+    const pct = (counts[s] / total) * 100;
+    return pct ? `<i style="width:${pct}%;background:var(--${s})" title="${STATUS_LABEL[s]}: ${counts[s]}"></i>` : "";
+  }).join("");
+
+  const trackName = (id) => (tracks.find(t => t.id === id)?.name) || (id ? `Track ${id}` : "Unfiled");
+  const trackColor = (id) => (tracks.find(t => t.id === id)?.color) || "var(--faint)";
+
+  const queue = papers.filter(p => p.status === "reading" || p.status === "todo")
+    .sort((a, b) => STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status) || (a.curr_order ?? 99) - (b.curr_order ?? 99));
+
+  let html = "";
+  if (queue.length) {
+    html += `<h2 class="sec">Reading queue</h2>` + queue.map(paperCard).join("");
+  }
+
+  const byTrack = {};
+  papers.forEach(p => { (byTrack[p.track] = byTrack[p.track] || []).push(p); });
+  Object.keys(byTrack).sort().forEach(tid => {
+    const list = byTrack[tid].slice().sort((a, b) => (a.curr_order ?? 99) - (b.curr_order ?? 99));
+    html += `<h2 class="sec"><span style="color:${trackColor(tid)}">●</span> <span class="track-name">${esc(trackName(tid))}</span> <span style="color:var(--faint);font-weight:400">${list.length}</span></h2>`;
+    html += list.map(paperCard).join("");
+  });
+
+  $("content").innerHTML = html;
+  $("hint").textContent = library?.id ? `Library id: ${library.id}` : "";
+}
+
+function paperCard(p) {
+  const st = STATUS_LABEL[p.status] ? p.status : "todo";
+  const details = DETAIL_FIELDS.map(([k, label]) => {
+    const v = p[k];
+    const val = v ? esc(v) : `<span class="empty-field">—</span>`;
+    return `<dt>${label}</dt><dd>${val}</dd>`;
+  }).join("");
+  const link = p.link ? `<dt>Link</dt><dd><a href="${esc(p.link)}" target="_blank" rel="noopener">${esc(p.link)}</a></dd>` : "";
+  const tags = (p.tags && p.tags.length) ? `<dt>Tags</dt><dd>${p.tags.map(t => `<span class="tag">${esc(t)}</span>`).join("")}</dd>` : "";
+  return `<details class="paper">
+    <summary>
+      <span class="pill ${st}">${STATUS_LABEL[st]}</span>
+      <span class="p-title">${esc(p.title)}</span>
+      <span class="p-cite">${esc(p.citation || "")}</span>
+    </summary>
+    <div class="detail"><dl>${details}${link}${tags}</dl><div class="id">${esc(p.id)}${p.type ? " · " + esc(p.type) : ""}</div></div>
+  </details>`;
+}
+
+function digestForModel() {
+  const { library, tracks, papers } = DATA;
+  const tName = (id) => (tracks.find(t => t.id === id)?.name) || id || "Unfiled";
+  let out = `# ${library?.name || "Library"} — reading digest\n\n`;
+  ["done", "reading", "todo"].forEach(status => {
+    const list = papers.filter(p => p.status === status);
+    if (!list.length) return;
+    out += `## ${STATUS_LABEL[status]} (${list.length})\n\n`;
+    list.forEach(p => {
+      out += `- **${p.title}** — ${p.citation || "no citation"} [${tName(p.track)}]\n`;
+      if (p.findings) out += `  - Findings: ${p.findings}\n`;
+      if (p.relevance) out += `  - Relevance: ${p.relevance}\n`;
+    });
+    out += "\n";
+  });
+  out += `_Generated from litflow. Paste into a model and ask it to synthesize, find gaps, or suggest what to read next._\n`;
+  return out;
+}
+
+function toast(msg) {
+  const t = $("toast");
+  t.textContent = msg; t.classList.add("show");
+  setTimeout(() => t.classList.remove("show"), 1800);
+}
+
+$("copyBtn").addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText(digestForModel()); toast("Digest copied — paste it into a model"); }
+  catch { toast("Copy failed — your browser blocked clipboard access"); }
+});
+
+$("fileInput").addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const parsed = JSON.parse(reader.result);
+      if (!parsed.papers || !Array.isArray(parsed.papers)) throw new Error("no papers array");
+      DATA = { library: parsed.library || {}, tracks: parsed.tracks || [], papers: parsed.papers };
+      render();
+      toast(`Loaded ${DATA.papers.length} papers`);
+    } catch (err) {
+      toast("That file isn't a litflow library export");
+    }
+  };
+  reader.readAsText(file);
+});
+
+render();
+</script>
+</body>
+</html>
