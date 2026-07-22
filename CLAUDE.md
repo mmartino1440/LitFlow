@@ -4,25 +4,26 @@ Repo-specific guidance for working on LitFlow. See root README.md for what the a
 
 ## Repo shape
 
-LitFlow is a single-file HTML/JS/CSS web app with **no build step**. `litflow.html` is canonical;
-`litflow-ann.html`, `litflow-dissertation.html`, and `litflow-sefl.html` are independently-maintained,
-near-byte-identical branded copies (different `<title>`/project name, otherwise the same code). There
-is no template or generator — each copy is a real file that must be edited separately.
+LitFlow is a single-file HTML/JS/CSS web app with **no build step**. `litflow.html` is the **only**
+app file — there is no multi-file branded-copy pattern anymore. (Through v1.9, separate near-
+identical copies like `litflow-ann.html`/`litflow-dissertation.html` existed purely so each got its
+own isolated localStorage bucket via filename-based namespacing; that mechanism is gone as of v1.10.)
 
-**When a change touches shared subsystems** (persistence, provider/LLM calls, core data model, modals,
-etc.), it must be applied to all four files identically. The fast, low-risk way to do this:
+**Multiple libraries live inside the one file.** Data is namespaced by an explicit library id, not a
+filename: `lf_libraries` (localStorage key) holds the index of `{id, name, createdAt}` entries,
+`lf_currentLibrary` holds the active id, and each library's own data lives under `lf_<id>_papers`,
+`lf_<id>_tracks`, `lf_<id>_settings`, etc. (`litflow.html`, `LIBRARIES` region, ~line 1042 onward). A
+header dropdown (`#libSelect`) switches the active library; a management modal handles create/rename/
+delete. The very first library (the pre-existing single-library data from before this feature shipped)
+keeps a fixed id of `'litflow'` for continuity with existing users' IndexedDB file handles.
 
-1. Make the change in `litflow.html` first, verify it (see `verify` skill / manual browser check).
-2. `git diff litflow.html > /tmp/patch.diff`, then `sed` the filename in the patch header and
-   `git apply` it to each other file. `git apply` tolerates line-number drift from unrelated local
-   edits in the target file (it matches on context), so this works even when the other files aren't
-   byte-identical to `litflow.html` at that moment — confirm with `git apply --check` first.
-3. If `git apply --check` fails for a file, fall back to `Edit` with anchor text (function names,
-   `id="..."` strings) rather than hardcoded line numbers, and re-verify that file specifically.
+If you're tempted to fork `litflow.html` into a new branded copy again for a new project/dataset,
+don't — extend the in-app library switcher instead. That's specifically what it was built to replace.
 
-Don't assume the four files are in sync before you start — diff the relevant region first
-(`diff <(sed -n 'X,Yp' fileA) <(sed -n 'X,Yp' fileB)`), since ann/dissertation/sefl often carry
-their own unrelated in-flight edits.
+On first load after upgrading, the app scans for the old filename-derived legacy keys
+(`lf_litflow-ann_*`, `lf_litflow-dissertation_*`, `lf_litflow-sefl_*`) and offers a one-time import of
+each as a named library (`bootstrapLibraries()`/`showMigrationModal()`). Legacy keys are never deleted
+automatically, whether imported or skipped.
 
 ## Versioning & changelogs
 
@@ -78,3 +79,37 @@ actually shipped.
   - Scope for v1: skip automatic detect-and-resume when Claude Code's usage cap is hit — just surface
     its error message clearly and let the user manually retry once the limit resets. Only build
     polling/auto-resume if manual retry turns out to be annoying in practice.
+
+- **Citation verification & relevance-backfill from a manuscript draft (not yet started).** Goal:
+  let users paste a manuscript/abstract draft and (a) have an LLM backfill each library paper's
+  Relevance field explaining why it matters to *that specific draft*, and (b) step through each claim
+  in the draft with a one-click jump to its cited paper, to manually verify the claim (Ctrl+F in the
+  source, or just checking figures — no automated full-text verification, since the app has no access
+  to the source PDF/webpage's actual text, only a `link` URL).
+  - **Relevance backfill**: extend `runPaperAI(id, type)` (~line 2112) with a new `type` that takes
+    the pasted draft text plus one paper's existing notes and asks the LLM why that paper is relevant
+    to the draft, then loop over all papers sequentially (same no-concurrency pattern as
+    `runBatchCondense`/`runConsensus`, ~2344/2394) reusing the token-estimate UI
+    (`updateMultiStepUI`, ~2267) to warn about cost before running. Writes go through the existing
+    `updateF(id, 'relevance', val)` setter (~1898).
+  - **Data-safety flag for whoever builds this**: backfilling `relevance` in a loop risks silently
+    overwriting a user's own hand-written relevance notes — the same class of bug fixed in v1.8.1 for
+    disk-reconnect overwrites. Don't auto-overwrite non-empty fields without a per-paper or
+    whole-batch confirmation, and consider reusing the recovery-snapshot mechanism added in v1.8.1
+    before a batch write.
+  - **Citation verification stepper**: no existing "claims" data model — this needs a new LLM call
+    that reads the pasted draft and returns a list of `{claim text, cited-source text}` pairs. Because
+    every existing prompt in the codebase (`buildSynthPrompt`, `buildChunkSummaryPrompt`, etc.) returns
+    free text and none parse structured output, this is new territory: the prompt needs to ask for
+    strict JSON and the response needs a parse-with-fallback path, since `callLLM`'s return value
+    (`d.content[0].text` / `d.choices[0].message.content`) is untyped prose everywhere else today.
+  - Match each extracted citation reference against the library by comparing to each paper's
+    `citation` field (already parsed by `parseCitation` for RIS/BibTeX export) — fuzzy match, not
+    exact, since manuscript in-text citations rarely match the stored citation string verbatim.
+  - Stepper UI (prev/next through claims) can reuse `openPaperCard(id)` (~line 1715) to jump to and
+    scroll-highlight the matched paper's card — no new "jump to source" mechanic needed, only a new
+    thin wrapper around it plus prev/next state.
+  - **Scope for v1**: single manuscript-paste box (no live sync with an external doc), one LLM call to
+    extract claims + citation matches (not incremental), no automated verification against source text
+    — verification stays a manual human step; the app's job is just fast navigation to the right paper
+    plus (optionally) a suggested search phrase to Ctrl+F for.

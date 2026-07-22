@@ -106,6 +106,14 @@ header {
 .hbtn-ghost:hover { color: var(--white); border-color: var(--slate); }
 .hbtn-amber { color: var(--navy); background: var(--amber); border-color: var(--amber); font-weight: 700; }
 .hbtn-amber:hover { background: var(--amber-2); }
+.lib-switch { display: flex; align-items: center; gap: 0.35rem; flex-shrink: 0; }
+.lib-switch select {
+  font-size: 0.72rem; font-weight: 600; color: var(--slate);
+  background: transparent; border: 1px solid var(--border); border-radius: 5px;
+  padding: 4px 8px; cursor: pointer; max-width: 140px;
+}
+.lib-switch select:hover, .lib-switch select:focus { color: var(--white); border-color: var(--slate); outline: none; }
+.lib-switch select option { background: var(--navy); color: var(--white); }
 
 /* ── Backup staleness badge ── */
 .settings-wrap { position: relative; display: inline-flex; }
@@ -514,6 +522,10 @@ header {
     <span class="brand-byline">by Mike Martino MD/PhD</span>
   </a>
   <div class="header-divider"></div>
+  <div class="lib-switch">
+    <select id="libSelect" onchange="switchLibrary(this.value)" title="Switch library"></select>
+    <button class="hbtn hbtn-ghost" onclick="openLibraryManageModal()" title="Manage libraries" style="padding:0.4rem 0.55rem">⚙</button>
+  </div>
   <div id="fileStatusChip" style="display:none;font-size:0.72rem;font-weight:600;flex-shrink:0"></div>
   <div class="header-stats" id="headerStats"></div>
   <div class="header-right">
@@ -977,6 +989,35 @@ header {
   </div>
 </div>
 
+<!-- Library manage modal -->
+<div class="modal-bg" id="libraryManageModal">
+  <div class="modal">
+    <h3>Manage libraries</h3>
+    <p style="font-size:0.78rem;color:var(--muted);margin-bottom:0.75rem;line-height:1.5">Each library keeps its own papers, tracks, and settings. Removing a library from this list only unlists it — its data stays in browser storage.</p>
+    <div id="libraryManageList"></div>
+    <div style="display:flex;gap:0.5rem;align-items:center;margin-top:0.75rem;padding-top:0.75rem;border-top:1px solid var(--surf-3)">
+      <input type="text" id="newLibraryName" placeholder="New library name" style="flex:1;font-family:Inter,sans-serif;font-size:0.8rem;border:1px solid var(--surf-3);border-radius:5px;padding:0.35rem 0.6rem" onkeydown="if(event.key==='Enter')submitNewLibrary()">
+      <button class="btn btn-outline" onclick="submitNewLibrary()">+ New Library</button>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeLibraryManageModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- One-time legacy-library import modal -->
+<div class="modal-bg" id="migrationModal">
+  <div class="modal">
+    <h3>Import your other libraries?</h3>
+    <p style="font-size:0.83rem;color:var(--muted);margin-bottom:0.75rem;line-height:1.6">LitFlow found data from older separate copies of the app on this browser. You can bring each one in as its own library here — nothing is removed from where it currently lives.</p>
+    <div id="migrationList"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeMigrationModal()">Skip</button>
+      <button class="btn btn-amber" onclick="confirmMigrateLibraries()">Import selected</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ─────────────────────────────────────────
 // DEFAULTS
@@ -1039,12 +1080,62 @@ let tracks  = [];
 let settings = {};
 let currentView = 'today';
 
-// Per-filename storage namespace — isolates data when multiple copies
-// live on the same origin (e.g. litflow.html vs ann-tracker.html on Vercel)
-const NS = (location.pathname.split('/').pop() || 'litflow')
-  .replace(/\.html?$/i, '')
-  .replace(/[^a-z0-9_-]/gi, '_')
-  || 'litflow';
+// Multi-library storage — each library's data lives under lf_<id>_*, isolated
+// by a library id (chosen at creation time, not derived from the filename).
+// This replaced the old one-file-per-library scheme (litflow.html, litflow-ann.html,
+// litflow-dissertation.html), where isolation came from each file's own filename.
+let LIB = 'litflow';
+let migrationCandidates = [];
+
+function getLibraries() {
+  try { return JSON.parse(localStorage.getItem('lf_libraries') || '[]'); }
+  catch { return []; }
+}
+function saveLibraries(libs) { localStorage.setItem('lf_libraries', JSON.stringify(libs)); }
+
+// One-time bootstrap: turns this file's pre-existing single-library data (its own
+// lf_litflow_* keys) into the first entry of the library index, and collects any
+// legacy per-file libraries (litflow-ann.html, litflow-dissertation.html,
+// litflow-sefl.html) found in this browser's localStorage under their old
+// filename-derived keys, so load() can offer a one-time import.
+function prettifyNs(ns) {
+  const s = ns.replace(/[_-]+/g, ' ').trim();
+  return s.replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function bootstrapLibraries() {
+  if (localStorage.getItem('lf_libraries')) return;
+  let name = 'My Research';
+  try {
+    const s = JSON.parse(localStorage.getItem('lf_litflow_settings') || '{}');
+    if (s.project) name = s.project;
+  } catch {}
+  saveLibraries([{ id: 'litflow', name, createdAt: new Date().toISOString() }]);
+  if (!localStorage.getItem('lf_currentLibrary')) localStorage.setItem('lf_currentLibrary', 'litflow');
+
+  // Scan for any other lf_<ns>_papers bucket left behind by an older separate
+  // copy of the app. Namespaces were derived from that file's name at save
+  // time, which may not match any filename that exists today (the file could
+  // have since been renamed or removed) — so this has to be a dynamic scan
+  // of whatever's actually in localStorage, not a fixed list of known names.
+  const legacyNs = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    const m = key && key.match(/^lf_(.+)_papers$/);
+    if (m && m[1] !== 'litflow') legacyNs.push(m[1]);
+  }
+  migrationCandidates = legacyNs.map(ns => {
+    const raw = localStorage.getItem(`lf_${ns}_papers`);
+    let count = 0;
+    try { count = (JSON.parse(raw) || []).length; } catch {}
+    let suggestedName = prettifyNs(ns);
+    try {
+      const s = JSON.parse(localStorage.getItem(`lf_${ns}_settings`) || '{}');
+      if (s.project) suggestedName = s.project;
+    } catch {}
+    return { oldNs: ns, suggestedName, count };
+  });
+}
 
 // Disk persistence state
 let fileHandle = null;
@@ -1058,29 +1149,13 @@ let pendingConflictData = null;
 let pendingImportData = null;
 
 async function load() {
-  // One-time silent migration: move legacy un-namespaced keys → namespaced keys
-  // (only runs for litflow.html, only if new key doesn't exist yet)
-  if (NS === 'litflow' && !localStorage.getItem('lf_litflow_papers')) {
-    const legacyPapers   = localStorage.getItem('lf_papers');
-    const legacyTracks   = localStorage.getItem('lf_tracks');
-    const legacySettings = localStorage.getItem('lf_settings');
-    const legacyBackup   = localStorage.getItem('lf_last_backup');
-    const legacyOnboard  = localStorage.getItem('lf_onboarded');
-    if (legacyPapers) {
-      localStorage.setItem(`lf_${NS}_papers`,   legacyPapers);
-      localStorage.setItem(`lf_${NS}_tracks`,   legacyTracks   || '[]');
-      localStorage.setItem(`lf_${NS}_settings`, legacySettings || '{}');
-      if (legacyBackup)  localStorage.setItem(`lf_${NS}_last_backup`, legacyBackup);
-      if (legacyOnboard) localStorage.setItem(`lf_${NS}_onboarded`,   legacyOnboard);
-      ['lf_papers','lf_tracks','lf_settings','lf_last_backup','lf_onboarded']
-        .forEach(k => localStorage.removeItem(k));
-    }
-  }
+  bootstrapLibraries();
+  LIB = localStorage.getItem('lf_currentLibrary') || 'litflow';
 
   // Always load from localStorage first (instant, no async required)
-  papers   = JSON.parse(localStorage.getItem(`lf_${NS}_papers`)  || '[]');
-  tracks   = JSON.parse(localStorage.getItem(`lf_${NS}_tracks`)  || JSON.stringify(DEFAULT_TRACKS));
-  settings = { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem(`lf_${NS}_settings`) || JSON.stringify(DEFAULT_SETTINGS)) };
+  papers   = JSON.parse(localStorage.getItem(`lf_${LIB}_papers`)  || '[]');
+  tracks   = JSON.parse(localStorage.getItem(`lf_${LIB}_tracks`)  || JSON.stringify(DEFAULT_TRACKS));
+  settings = { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem(`lf_${LIB}_settings`) || JSON.stringify(DEFAULT_SETTINGS)) };
   settings.modelByProvider = { ...DEFAULT_SETTINGS.modelByProvider, ...(settings.modelByProvider || {}) };
   if (!tracks.find(t => t.id === 'unassigned')) tracks.unshift(UNASSIGNED_TRACK);
 
@@ -1116,7 +1191,7 @@ async function load() {
 // A missing/legacy disk timestamp is treated as "not newer" (never blocks).
 function localIsNewer(diskSavedAt) {
   if (!diskSavedAt) return false;
-  const local = localStorage.getItem(`lf_${NS}_last_modified`);
+  const local = localStorage.getItem(`lf_${LIB}_last_modified`);
   if (!local) return false;
   return new Date(local).getTime() > new Date(diskSavedAt).getTime();
 }
@@ -1138,19 +1213,19 @@ function applyDiskPayload(d) {
 // it gets replaced wholesale (conflict resolution, import, reset) — a self-service
 // undo if the wrong choice is made, without a full version-history system.
 function snapshotRecovery() {
-  localStorage.setItem(`lf_${NS}_recovery`, JSON.stringify({
+  localStorage.setItem(`lf_${LIB}_recovery`, JSON.stringify({
     papers, tracks: tracks.filter(t => !t.builtin), settings,
-    savedAt: localStorage.getItem(`lf_${NS}_last_modified`) || null,
+    savedAt: localStorage.getItem(`lf_${LIB}_last_modified`) || null,
   }));
 }
 
 function save() {
   const savableTracks = tracks.filter(t => !t.builtin);
   const now = new Date().toISOString();
-  localStorage.setItem(`lf_${NS}_papers`,   JSON.stringify(papers));
-  localStorage.setItem(`lf_${NS}_tracks`,   JSON.stringify(savableTracks));
-  localStorage.setItem(`lf_${NS}_settings`, JSON.stringify(settings));
-  localStorage.setItem(`lf_${NS}_last_modified`, now);
+  localStorage.setItem(`lf_${LIB}_papers`,   JSON.stringify(papers));
+  localStorage.setItem(`lf_${LIB}_tracks`,   JSON.stringify(savableTracks));
+  localStorage.setItem(`lf_${LIB}_settings`, JSON.stringify(settings));
+  localStorage.setItem(`lf_${LIB}_last_modified`, now);
   if (fileHandle && !pendingReconnect && !fileConflict) {
     writeToFileHandle(fileHandle, { papers, tracks: savableTracks, settings, savedAt: now })
       .catch(e => console.warn('LitFlow: file write failed:', e.message));
@@ -1170,29 +1245,29 @@ function openHandleDB() {
     req.onerror   = e => reject(e.target.error);
   });
 }
-async function storeFileHandle(handle) {
+async function storeFileHandle(handle, ns = LIB) {
   const db = await openHandleDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction('handles', 'readwrite');
-    tx.objectStore('handles').put(handle, NS);
+    tx.objectStore('handles').put(handle, ns);
     tx.oncomplete = resolve;
     tx.onerror = e => reject(e.target.error);
   });
 }
-async function getStoredFileHandle() {
+async function getStoredFileHandle(ns = LIB) {
   const db = await openHandleDB();
   return new Promise((resolve, reject) => {
     const tx  = db.transaction('handles', 'readonly');
-    const req = tx.objectStore('handles').get(NS);
+    const req = tx.objectStore('handles').get(ns);
     req.onsuccess = e => resolve(e.target.result || null);
     req.onerror   = e => reject(e.target.error);
   });
 }
-async function clearFileHandle() {
+async function clearFileHandle(ns = LIB) {
   const db = await openHandleDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction('handles', 'readwrite');
-    tx.objectStore('handles').delete(NS);
+    tx.objectStore('handles').delete(ns);
     tx.oncomplete = resolve;
     tx.onerror = e => reject(e.target.error);
   });
@@ -1230,7 +1305,7 @@ async function connectDataFile() {
     const savableTracks = tracks.filter(t => !t.builtin);
     const now = new Date().toISOString();
     await writeToFileHandle(handle, { papers, tracks: savableTracks, settings, savedAt: now });
-    localStorage.setItem(`lf_${NS}_last_modified`, now);
+    localStorage.setItem(`lf_${LIB}_last_modified`, now);
     updateFileStatusUI();
     const msg = document.getElementById('fileConnectMsg');
     if (msg) { msg.textContent = 'Connected ✓'; setTimeout(() => msg.textContent = '', 3000); }
@@ -1369,7 +1444,7 @@ function openConflictModal() {
   if (err) err.textContent = '';
   if (body) {
     const localCount = papers.length;
-    const localTime  = fmtTimestamp(localStorage.getItem(`lf_${NS}_last_modified`));
+    const localTime  = fmtTimestamp(localStorage.getItem(`lf_${LIB}_last_modified`));
     const diskCount  = (pendingConflictData.papers || []).length;
     const diskTime   = fmtTimestamp(pendingConflictData.savedAt);
     body.innerHTML = `
@@ -1403,7 +1478,7 @@ async function resolveConflictKeepMine() {
     const savableTracks = tracks.filter(t => !t.builtin);
     const now = new Date().toISOString();
     await writeToFileHandle(fileHandle, { papers, tracks: savableTracks, settings, savedAt: now });
-    localStorage.setItem(`lf_${NS}_last_modified`, now);
+    localStorage.setItem(`lf_${LIB}_last_modified`, now);
     fileConflict = false;
     pendingConflictData = null;
     document.getElementById('conflictModal').classList.remove('open');
@@ -2510,26 +2585,26 @@ function exportJSON() {
   a.href = URL.createObjectURL(b);
   a.download = 'litflow-backup-' + new Date().toISOString().split('T')[0] + '.json';
   a.click();
-  localStorage.setItem(`lf_${NS}_last_backup`, new Date().toISOString());
+  localStorage.setItem(`lf_${LIB}_last_backup`, new Date().toISOString());
   checkBackupStatus();
 }
 
 function checkBackupStatus() {
   if (papers.length === 0) return; // nothing to lose — stay quiet
-  const lastBackup = localStorage.getItem(`lf_${NS}_last_backup`);
+  const lastBackup = localStorage.getItem(`lf_${LIB}_last_backup`);
   const stale = !lastBackup || (Date.now() - new Date(lastBackup).getTime()) > 7 * 24 * 60 * 60 * 1000;
   const badge = document.getElementById('backupBadge');
   if (badge) badge.classList.toggle('show', stale);
 
   // First-run banner: shown once until dismissed, only when no backup has ever been taken
-  if (!lastBackup && !localStorage.getItem(`lf_${NS}_onboarded`)) {
+  if (!lastBackup && !localStorage.getItem(`lf_${LIB}_onboarded`)) {
     const banner = document.getElementById('onboardBanner');
     if (banner) banner.style.display = 'flex';
   }
 }
 
 function dismissOnboard() {
-  localStorage.setItem(`lf_${NS}_onboarded`, '1');
+  localStorage.setItem(`lf_${LIB}_onboarded`, '1');
   const banner = document.getElementById('onboardBanner');
   if (banner) banner.style.display = 'none';
 }
@@ -2711,11 +2786,11 @@ function confirmReset() { document.getElementById('resetModal').classList.add('o
 function closeModal()   { document.getElementById('resetModal').classList.remove('open'); }
 function doReset() {
   snapshotRecovery();
-  localStorage.removeItem(`lf_${NS}_papers`);
-  localStorage.removeItem(`lf_${NS}_tracks`);
-  localStorage.removeItem(`lf_${NS}_settings`);
-  localStorage.removeItem(`lf_${NS}_last_modified`);
-  closeModal(); load(); updateHeader(); updateSidebar(); showView('today'); checkRecoveryStatus();
+  localStorage.removeItem(`lf_${LIB}_papers`);
+  localStorage.removeItem(`lf_${LIB}_tracks`);
+  localStorage.removeItem(`lf_${LIB}_settings`);
+  localStorage.removeItem(`lf_${LIB}_last_modified`);
+  closeModal(); load().then(reinitUI);
 }
 
 // ─────────────────────────────────────────
@@ -2725,11 +2800,11 @@ function doReset() {
 function checkRecoveryStatus() {
   const el = document.getElementById('recoveryStatus');
   if (!el) return;
-  const raw = localStorage.getItem(`lf_${NS}_recovery`);
+  const raw = localStorage.getItem(`lf_${LIB}_recovery`);
   if (!raw) { el.innerHTML = ''; return; }
   let snap;
   try { snap = JSON.parse(raw); } catch { el.innerHTML = ''; return; }
-  const currentModified = localStorage.getItem(`lf_${NS}_last_modified`);
+  const currentModified = localStorage.getItem(`lf_${LIB}_last_modified`);
   if (snap.savedAt && snap.savedAt === currentModified) { el.innerHTML = ''; return; }
   const count = (snap.papers || []).length;
   el.innerHTML = `
@@ -2740,7 +2815,7 @@ function checkRecoveryStatus() {
 }
 
 function restoreRecoverySnapshot() {
-  const raw = localStorage.getItem(`lf_${NS}_recovery`);
+  const raw = localStorage.getItem(`lf_${LIB}_recovery`);
   if (!raw) return;
   let snap;
   try { snap = JSON.parse(raw); } catch { return; }
@@ -2761,17 +2836,165 @@ function esc(s) {
 }
 
 // ─────────────────────────────────────────
-// INIT
+// LIBRARIES
 // ─────────────────────────────────────────
 
-load().then(() => {
+function reinitUI() {
   renderTrackSelects();
+  renderLibrarySelect();
   updateSidebar();
   updateHeader();
   showView('today');
   checkBackupStatus();
   updateFileStatusUI();
   checkRecoveryStatus();
+}
+
+function renderLibrarySelect() {
+  const sel = document.getElementById('libSelect');
+  if (!sel) return;
+  sel.innerHTML = getLibraries()
+    .map(l => `<option value="${l.id}"${l.id === LIB ? ' selected' : ''}>${esc(l.name)}</option>`)
+    .join('');
+}
+
+async function switchLibrary(id) {
+  if (id === LIB) return;
+  localStorage.setItem('lf_currentLibrary', id);
+  // Transient state belongs to the library being left — a connected file handle
+  // or pending import for library A must never silently apply to library B.
+  fileHandle = null;
+  pendingReconnect = false;
+  fileConflict = false;
+  pendingConflictData = null;
+  pendingImportData = null;
+  await load();
+  reinitUI();
+}
+
+function createLibrary(name) {
+  const libs = getLibraries();
+  const id = 'lib_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  libs.push({ id, name: name || 'New Library', createdAt: new Date().toISOString() });
+  saveLibraries(libs);
+  switchLibrary(id);
+}
+
+function renameLibrary(id, name) {
+  const libs = getLibraries();
+  const lib = libs.find(l => l.id === id);
+  if (!lib || !name) return;
+  lib.name = name;
+  saveLibraries(libs);
+  renderLibrarySelect();
+}
+
+// Removes a library from the index only — its lf_<id>_* data is left in
+// localStorage untouched (same philosophy as the legacy-import migration:
+// never hard-delete namespaced data just because the app-level pointer to it
+// goes away, since keeping it costs nothing).
+function deleteLibrary(id, btn) {
+  if (btn && btn.dataset.armed !== '1') {
+    btn.dataset.armed = '1';
+    btn.textContent = 'Confirm?';
+    setTimeout(() => { if (btn.isConnected) { btn.dataset.armed = '0'; btn.textContent = '✕'; } }, 3000);
+    return;
+  }
+  let libs = getLibraries();
+  if (libs.length <= 1) return;
+  libs = libs.filter(l => l.id !== id);
+  saveLibraries(libs);
+  if (id === LIB) switchLibrary(libs[0].id);
+  else { renderLibrarySelect(); renderLibraryManageList(); }
+}
+
+function openLibraryManageModal() {
+  renderLibraryManageList();
+  document.getElementById('libraryManageModal').classList.add('open');
+}
+function closeLibraryManageModal() {
+  document.getElementById('libraryManageModal').classList.remove('open');
+}
+
+function renderLibraryManageList() {
+  const el = document.getElementById('libraryManageList');
+  if (!el) return;
+  const libs = getLibraries();
+  el.innerHTML = libs.map(l => {
+    let count = 0;
+    try { count = (JSON.parse(localStorage.getItem(`lf_${l.id}_papers`) || '[]')).length; } catch {}
+    return `
+    <div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.4rem">
+      <input type="text" value="${esc(l.name)}" onchange="renameLibrary('${l.id}',this.value)" style="flex:1;font-family:Inter,sans-serif;font-size:0.8rem;border:1px solid var(--surf-3);border-radius:5px;padding:0.35rem 0.6rem">
+      <span style="font-size:0.7rem;color:var(--muted);white-space:nowrap">${count} paper${count === 1 ? '' : 's'}</span>
+      <button class="btn btn-outline" onclick="deleteLibrary('${l.id}',this)" ${libs.length <= 1 ? 'disabled' : ''} style="flex-shrink:0;color:#dc2626;border-color:#fca5a5">✕</button>
+    </div>`;
+  }).join('');
+}
+
+function submitNewLibrary() {
+  const input = document.getElementById('newLibraryName');
+  const name = (input.value || '').trim();
+  if (!name) return;
+  input.value = '';
+  closeLibraryManageModal();
+  createLibrary(name);
+}
+
+// One-time prompt (shown once per browser profile, right after first paint) offering
+// to import data left behind by the old separate litflow-ann.html / litflow-dissertation.html
+// / litflow-sefl.html files. Legacy keys are copied, never moved — see bootstrapLibraries().
+function showMigrationModal() {
+  const el = document.getElementById('migrationList');
+  if (!el) return;
+  el.innerHTML = migrationCandidates.map((c, i) => `
+    <div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.5rem">
+      <input type="checkbox" id="migCheck-${i}" checked style="flex-shrink:0">
+      <input type="text" id="migName-${i}" value="${esc(c.suggestedName)}" style="flex:1;font-family:Inter,sans-serif;font-size:0.8rem;border:1px solid var(--surf-3);border-radius:5px;padding:0.35rem 0.6rem">
+      <span style="font-size:0.7rem;color:var(--muted);white-space:nowrap">${c.count} paper${c.count === 1 ? '' : 's'}</span>
+    </div>`).join('');
+  document.getElementById('migrationModal').classList.add('open');
+}
+function closeMigrationModal() {
+  migrationCandidates = [];
+  document.getElementById('migrationModal').classList.remove('open');
+}
+async function confirmMigrateLibraries() {
+  const libs = getLibraries();
+  for (let i = 0; i < migrationCandidates.length; i++) {
+    const c = migrationCandidates[i];
+    const checked = document.getElementById(`migCheck-${i}`)?.checked;
+    if (!checked) continue;
+    const name = (document.getElementById(`migName-${i}`)?.value || '').trim() || c.suggestedName;
+    const newId = 'lib_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6) + i;
+    ['papers', 'tracks', 'settings', 'last_modified', 'last_backup', 'onboarded'].forEach(suffix => {
+      const v = localStorage.getItem(`lf_${c.oldNs}_${suffix}`);
+      if (v !== null) localStorage.setItem(`lf_${newId}_${suffix}`, v);
+    });
+    // Carry over a connected disk file too, if this legacy library had one — otherwise
+    // the migrated library would be stuck with whatever was last mirrored to
+    // localStorage instead of staying in sync with the actual file on disk.
+    if (fileSystemSupported) {
+      try {
+        const oldHandle = await getStoredFileHandle(c.oldNs);
+        if (oldHandle) await storeFileHandle(oldHandle, newId);
+      } catch (e) { console.warn('LitFlow: could not carry over file handle for', c.oldNs, e.message); }
+    }
+    libs.push({ id: newId, name, createdAt: new Date().toISOString() });
+  }
+  saveLibraries(libs);
+  migrationCandidates = [];
+  document.getElementById('migrationModal').classList.remove('open');
+  renderLibrarySelect();
+}
+
+// ─────────────────────────────────────────
+// INIT
+// ─────────────────────────────────────────
+
+load().then(() => {
+  reinitUI();
+  if (migrationCandidates.length) showMigrationModal();
 });
 </script>
 </body>

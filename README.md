@@ -36,6 +36,11 @@ A paper describing this tool is planned for submission to the Journal of Open So
 
 ## Changelog
 
+### v1.10
+- Multiple libraries in one file — switch between separate paper collections (e.g. personal research, a collaborator's project, a dissertation) from a dropdown in the header, instead of maintaining separate copies of litflow.html
+- Create, rename, and delete libraries from the header's library manager
+- Existing multi-file users (litflow-ann.html, litflow-dissertation.html) are offered a one-time import of their old data into named libraries the first time they open the consolidated litflow.html — nothing is deleted automatically
+
 ### v1.9
 - All Papers list now sorts alphabetically by title (case-insensitive) by default, on top of the existing track/status/type filters and search
 - Paper titles are now editable after creation — new Title field in each paper's expand panel, no more deleting and re-adding a paper to fix a typo
