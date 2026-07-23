@@ -1166,15 +1166,20 @@ async function load() {
     if (!storedHandle) return;
     const perm = await storedHandle.queryPermission({ mode: 'readwrite' });
     if (perm === 'granted') {
-      const d = await readFromFileHandle(storedHandle);
-      if (localIsNewer(d.savedAt)) {
+      const full = await readFromFileHandle(storedHandle);
+      const entry = full.libraries && full.libraries[LIB];
+      if (!entry) {
+        // Shared file is connected but has no section for this library yet
+        // (e.g. a library created after the file was) — next save() adds one.
+        fileHandle = storedHandle;
+      } else if (localIsNewer(entry.savedAt)) {
         // Local has unsaved edits newer than the file — don't clobber silently.
         // Boot is unattended, so just flag it; the UI surfaces a resolve affordance.
         fileHandle = storedHandle;
         fileConflict = true;
-        pendingConflictData = d;
+        pendingConflictData = entry;
       } else {
-        applyDiskPayload(d);
+        applyDiskPayload(entry);
         fileHandle = storedHandle;
       }
     } else {
@@ -1184,6 +1189,28 @@ async function load() {
   } catch (e) {
     console.warn('LitFlow: could not load from data file:', e.message);
   }
+}
+
+// Assembles every known library's current data from localStorage into the
+// shape the shared data file stores — {libraries: {<id>: {name, papers,
+// tracks, settings, savedAt}}}. Called right before every write to the shared
+// file so a save to one library never clobbers the others' sections.
+function gatherAllLibrariesForFile() {
+  const out = {};
+  getLibraries().forEach(l => {
+    let p = [], t = [], s = {};
+    try { p = JSON.parse(localStorage.getItem(`lf_${l.id}_papers`) || '[]'); } catch {}
+    try { t = JSON.parse(localStorage.getItem(`lf_${l.id}_tracks`) || '[]'); } catch {}
+    try { s = JSON.parse(localStorage.getItem(`lf_${l.id}_settings`) || '{}'); } catch {}
+    out[l.id] = {
+      name: l.name,
+      papers: p,
+      tracks: t.filter(tr => !tr.builtin),
+      settings: s,
+      savedAt: localStorage.getItem(`lf_${l.id}_last_modified`) || null,
+    };
+  });
+  return out;
 }
 
 // True only if localStorage's last-saved timestamp is strictly newer than the
@@ -1227,7 +1254,7 @@ function save() {
   localStorage.setItem(`lf_${LIB}_settings`, JSON.stringify(settings));
   localStorage.setItem(`lf_${LIB}_last_modified`, now);
   if (fileHandle && !pendingReconnect && !fileConflict) {
-    writeToFileHandle(fileHandle, { papers, tracks: savableTracks, settings, savedAt: now })
+    writeToFileHandle(fileHandle, { libraries: gatherAllLibrariesForFile() })
       .catch(e => console.warn('LitFlow: file write failed:', e.message));
   }
 }
@@ -1245,29 +1272,34 @@ function openHandleDB() {
     req.onerror   = e => reject(e.target.error);
   });
 }
-async function storeFileHandle(handle, ns = LIB) {
+// One shared file handle for the whole app, not one per library — the File
+// System Access permission grant doesn't reliably survive for multiple
+// simultaneously-connected handles from the same origin, so a single file
+// covering all libraries (see gatherAllLibrariesForFile) avoids re-prompting.
+const SHARED_HANDLE_KEY = '__shared__';
+async function storeFileHandle(handle) {
   const db = await openHandleDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction('handles', 'readwrite');
-    tx.objectStore('handles').put(handle, ns);
+    tx.objectStore('handles').put(handle, SHARED_HANDLE_KEY);
     tx.oncomplete = resolve;
     tx.onerror = e => reject(e.target.error);
   });
 }
-async function getStoredFileHandle(ns = LIB) {
+async function getStoredFileHandle() {
   const db = await openHandleDB();
   return new Promise((resolve, reject) => {
     const tx  = db.transaction('handles', 'readonly');
-    const req = tx.objectStore('handles').get(ns);
+    const req = tx.objectStore('handles').get(SHARED_HANDLE_KEY);
     req.onsuccess = e => resolve(e.target.result || null);
     req.onerror   = e => reject(e.target.error);
   });
 }
-async function clearFileHandle(ns = LIB) {
+async function clearFileHandle() {
   const db = await openHandleDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction('handles', 'readwrite');
-    tx.objectStore('handles').delete(ns);
+    tx.objectStore('handles').delete(SHARED_HANDLE_KEY);
     tx.oncomplete = resolve;
     tx.onerror = e => reject(e.target.error);
   });
@@ -1297,15 +1329,14 @@ async function connectDataFile() {
   try {
     const handle = await window.showSaveFilePicker({
       suggestedName: 'litflow-data.json',
-      types: [{ description: 'LitFlow Data', accept: { 'application/json': ['.json'] } }],
+      types: [{ description: 'LitFlow Data (all libraries)', accept: { 'application/json': ['.json'] } }],
     });
     await storeFileHandle(handle);
     fileHandle = handle;
     pendingReconnect = false;
-    const savableTracks = tracks.filter(t => !t.builtin);
     const now = new Date().toISOString();
-    await writeToFileHandle(handle, { papers, tracks: savableTracks, settings, savedAt: now });
     localStorage.setItem(`lf_${LIB}_last_modified`, now);
+    await writeToFileHandle(handle, { libraries: gatherAllLibrariesForFile() });
     updateFileStatusUI();
     const msg = document.getElementById('fileConnectMsg');
     if (msg) { msg.textContent = 'Connected ✓'; setTimeout(() => msg.textContent = '', 3000); }
@@ -1319,17 +1350,18 @@ async function reconnectFile() {
   try {
     const granted = await verifyPermission(fileHandle);
     if (!granted) return;
-    const d = await readFromFileHandle(fileHandle);
-    if (localIsNewer(d.savedAt)) {
+    const full = await readFromFileHandle(fileHandle);
+    const entry = full.libraries && full.libraries[LIB];
+    if (entry && localIsNewer(entry.savedAt)) {
       // User-initiated, so it's safe to interrupt with a choice.
       pendingReconnect = false;
       fileConflict = true;
-      pendingConflictData = d;
+      pendingConflictData = entry;
       updateFileStatusUI();
       openConflictModal();
       return;
     }
-    applyDiskPayload(d);
+    if (entry) applyDiskPayload(entry);
     pendingReconnect = false;
     fileConflict = false;
     pendingConflictData = null;
@@ -1407,7 +1439,7 @@ function updateFileStatusUI() {
     } else if (fileHandle && !pendingReconnect) {
       settingsEl.innerHTML = `
         <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.45rem">
-          <span style="font-size:0.8rem;color:var(--done);font-weight:600">📁 ${esc(fileHandle.name)} — syncing</span>
+          <span style="font-size:0.8rem;color:var(--done);font-weight:600">📁 ${esc(fileHandle.name)} — syncing all libraries</span>
           <button class="btn btn-outline" onclick="changeDataFile()">Change file</button>
           <button class="btn btn-outline" onclick="disconnectFile()" style="color:#dc2626;border-color:#fca5a5">Disconnect</button>
         </div>`;
@@ -1422,6 +1454,7 @@ function updateFileStatusUI() {
       settingsEl.innerHTML = `
         <div style="margin-bottom:0.45rem">
           <button class="btn btn-amber" onclick="connectDataFile()">📁 Connect data file</button>
+          <span style="font-size:0.72rem;color:var(--muted);margin-left:0.5rem">One file, shared across all your libraries</span>
           <span id="fileConnectMsg" style="font-size:0.75rem;color:var(--done);margin-left:0.5rem"></span>
         </div>`;
     }
@@ -1475,10 +1508,9 @@ function resolveConflictLoadFile() {
 async function resolveConflictKeepMine() {
   const err = document.getElementById('conflictModalError');
   try {
-    const savableTracks = tracks.filter(t => !t.builtin);
     const now = new Date().toISOString();
-    await writeToFileHandle(fileHandle, { papers, tracks: savableTracks, settings, savedAt: now });
     localStorage.setItem(`lf_${LIB}_last_modified`, now);
+    await writeToFileHandle(fileHandle, { libraries: gatherAllLibrariesForFile() });
     fileConflict = false;
     pendingConflictData = null;
     document.getElementById('conflictModal').classList.remove('open');
@@ -2971,15 +3003,6 @@ async function confirmMigrateLibraries() {
       const v = localStorage.getItem(`lf_${c.oldNs}_${suffix}`);
       if (v !== null) localStorage.setItem(`lf_${newId}_${suffix}`, v);
     });
-    // Carry over a connected disk file too, if this legacy library had one — otherwise
-    // the migrated library would be stuck with whatever was last mirrored to
-    // localStorage instead of staying in sync with the actual file on disk.
-    if (fileSystemSupported) {
-      try {
-        const oldHandle = await getStoredFileHandle(c.oldNs);
-        if (oldHandle) await storeFileHandle(oldHandle, newId);
-      } catch (e) { console.warn('LitFlow: could not carry over file handle for', c.oldNs, e.message); }
-    }
     libs.push({ id: newId, name, createdAt: new Date().toISOString() });
   }
   saveLibraries(libs);
