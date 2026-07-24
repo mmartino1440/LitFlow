@@ -2780,12 +2780,15 @@ function importJSON(e) {
         return;
       }
 
-      let importedPapers, importedTracks;
+      let importedPapers, importedTracks, importedProject;
       if (Array.isArray(d)) {
         importedPapers = d;
       } else if (d.papers) {
         importedPapers = d.papers;
         importedTracks = d.tracks;
+        // Only the cosmetic project label carries over -- never apiKey/provider/model,
+        // so importing someone else's export can't silently swap in their LLM config.
+        importedProject = d.settings && d.settings.project;
       }
       if (!importedPapers) { alert('Invalid JSON file.'); return; }
       pendingImportData = {
@@ -2794,6 +2797,7 @@ function importJSON(e) {
           track: /^\d+$/.test(p.track || '') ? `t${p.track}` : (p.track || 'unassigned')
         })),
         tracks: importedTracks,
+        project: importedProject,
       };
       if (papers.length === 0) {
         applyImport();
@@ -2820,9 +2824,12 @@ function importLibraryBundle(bundleLibraries) {
       ...p,
       track: /^\d+$/.test(p.track || '') ? `t${p.track}` : (p.track || 'unassigned'),
     }));
+    // Never carry a real apiKey into a new library from an imported bundle --
+    // same redaction exportJSON() already applies when writing a backup out.
+    const fixedSettings = { ...(entry.settings || {}), apiKey: '' };
     localStorage.setItem(`lf_${newId}_papers`, JSON.stringify(fixedPapers));
     localStorage.setItem(`lf_${newId}_tracks`, JSON.stringify(entry.tracks || []));
-    localStorage.setItem(`lf_${newId}_settings`, JSON.stringify(entry.settings || {}));
+    localStorage.setItem(`lf_${newId}_settings`, JSON.stringify(fixedSettings));
     if (entry.savedAt) localStorage.setItem(`lf_${newId}_last_modified`, entry.savedAt);
     libs.push({ id: newId, name: entry.name || bundleId, createdAt: new Date().toISOString() });
     imported++;
@@ -2837,6 +2844,7 @@ function applyImport() {
   if (!pendingImportData) return;
   papers = pendingImportData.papers;
   if (pendingImportData.tracks) tracks = pendingImportData.tracks;
+  if (pendingImportData.project) settings.project = pendingImportData.project;
   pendingImportData = null;
   save();
   updateHeader(); updateSidebar(); showView('today');
