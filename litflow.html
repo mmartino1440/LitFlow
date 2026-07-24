@@ -889,6 +889,7 @@ header {
             <input type="file" id="importFile" accept=".json" style="display:none" onchange="importJSON(event)">
             <button class="btn btn-outline" onclick="confirmReset()" style="color:#dc2626;border-color:#fca5a5">Reset all data</button>
           </div>
+          <p style="font-size:0.72rem;color:var(--muted);margin-top:0.35rem">Import JSON accepts either a single library's backup or a shared multi-library data file — a multi-library file brings in every library at once as new libraries, without overwriting anything.</p>
           <div id="recoveryStatus"></div>
         </div>
       </div>
@@ -2768,6 +2769,17 @@ function importJSON(e) {
   r.onload = ev => {
     try {
       const d = JSON.parse(ev.target.result);
+
+      // Multi-library bundle ({libraries: {<id>: {name, papers, tracks, settings}}}) --
+      // a shared data file, or another library's export of one -- imports every
+      // library in it as its own new library, instead of forcing a one-at-a-time
+      // single-library import for each.
+      if (d.libraries && typeof d.libraries === 'object' && !Array.isArray(d.libraries)) {
+        importLibraryBundle(d.libraries);
+        e.target.value = '';
+        return;
+      }
+
       let importedPapers, importedTracks;
       if (Array.isArray(d)) {
         importedPapers = d;
@@ -2791,6 +2803,34 @@ function importJSON(e) {
     } catch { alert('Invalid JSON file.'); }
   };
   r.readAsText(file);
+}
+
+// Imports every library from a multi-library bundle file as a brand-new named
+// library each -- never overwrites an existing library, always fresh ids --
+// so bringing in a reference/backup bundle is always additive, never destructive.
+function importLibraryBundle(bundleLibraries) {
+  const libs = getLibraries();
+  const entries = Object.entries(bundleLibraries);
+  if (!entries.length) { alert('That file has no libraries in it.'); return; }
+  let imported = 0;
+  entries.forEach(([bundleId, entry]) => {
+    if (!entry || !Array.isArray(entry.papers)) return;
+    const newId = 'lib_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6) + imported;
+    const fixedPapers = entry.papers.map(p => ({
+      ...p,
+      track: /^\d+$/.test(p.track || '') ? `t${p.track}` : (p.track || 'unassigned'),
+    }));
+    localStorage.setItem(`lf_${newId}_papers`, JSON.stringify(fixedPapers));
+    localStorage.setItem(`lf_${newId}_tracks`, JSON.stringify(entry.tracks || []));
+    localStorage.setItem(`lf_${newId}_settings`, JSON.stringify(entry.settings || {}));
+    if (entry.savedAt) localStorage.setItem(`lf_${newId}_last_modified`, entry.savedAt);
+    libs.push({ id: newId, name: entry.name || bundleId, createdAt: new Date().toISOString() });
+    imported++;
+  });
+  saveLibraries(libs);
+  renderLibrarySelect();
+  if (document.getElementById('libraryManageModal')?.classList.contains('open')) renderLibraryManageList();
+  alert(`Imported ${imported} librar${imported === 1 ? 'y' : 'ies'} from the file. Switch to ${imported === 1 ? 'it' : 'them'} from the header dropdown.`);
 }
 
 function applyImport() {
