@@ -36,6 +36,12 @@ A paper describing this tool is planned for submission to the Journal of Open So
 
 ## Changelog
 
+### v1.10
+- Multiple libraries — keep separate paper collections (e.g. distinct research projects) in one file, switchable from a dropdown in the header
+- If you only track one project, nothing changes day to day: same file, same workflow, just a small library selector in the header
+- If you have existing LitFlow JSON exports from other projects, a guided setup (Settings → Data, or the banner on first launch) walks you through creating a library and importing each one, then connecting one shared data file that backs up everything going forward
+- A connected data file now backs up all your libraries in one shared JSON file instead of one file per library — existing connected files upgrade automatically on next save
+
 ### v1.9
 - All Papers list now sorts alphabetically by title (case-insensitive) by default, on top of the existing track/status/type filters and search
 - Paper titles are now editable after creation — new Title field in each paper's expand panel, no more deleting and re-adding a paper to fix a typo
