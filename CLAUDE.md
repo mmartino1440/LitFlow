@@ -4,25 +4,29 @@ Repo-specific guidance for working on LitFlow. See root README.md for what the a
 
 ## Repo shape
 
-LitFlow is a single-file HTML/JS/CSS web app with **no build step**. `litflow.html` is canonical;
-`litflow-ann.html`, `litflow-dissertation.html`, and `litflow-sefl.html` are independently-maintained,
-near-byte-identical branded copies (different `<title>`/project name, otherwise the same code). There
-is no template or generator — each copy is a real file that must be edited separately.
+LitFlow is a single-file HTML/JS/CSS web app with **no build step**. `litflow.html` is the only
+app file — there is no multi-file branded-copy pattern.
 
-**When a change touches shared subsystems** (persistence, provider/LLM calls, core data model, modals,
-etc.), it must be applied to all four files identically. The fast, low-risk way to do this:
+**Multiple libraries live inside the one file.** Storage is namespaced by an explicit library id,
+not a filename: `lf_libraries` (localStorage key) holds the index of `{id, name, createdAt}`
+entries, `lf_currentLibrary` holds the active id, and each library's own data lives under
+`lf_<id>_papers`, `lf_<id>_tracks`, `lf_<id>_settings`, etc. (`litflow.html`, storage/`load()`/
+`save()` region, ~line 1040 onward). The first library always defaults to `NS` (the original
+filename-derived constant) as its id, so an existing single-library user's data is picked up as-is
+with zero migration — they just see a one-item dropdown in the header (`#libSelect`) plus a manage
+icon they can ignore unless they want more libraries.
 
-1. Make the change in `litflow.html` first, verify it (see `verify` skill / manual browser check).
-2. `git diff litflow.html > /tmp/patch.diff`, then `sed` the filename in the patch header and
-   `git apply` it to each other file. `git apply` tolerates line-number drift from unrelated local
-   edits in the target file (it matches on context), so this works even when the other files aren't
-   byte-identical to `litflow.html` at that moment — confirm with `git apply --check` first.
-3. If `git apply --check` fails for a file, fall back to `Edit` with anchor text (function names,
-   `id="..."` strings) rather than hardcoded line numbers, and re-verify that file specifically.
+There's deliberately **no automatic scan of localStorage for other libraries** — that was tried and
+dropped for surfacing confusing, often-stale results. Instead, a one-time banner on first launch
+(`guidedImportBanner`) offers a guided flow: create a library, import its JSON, repeat, then connect
+one shared data file (`connectDataFile()`) that backs up every library in a single JSON blob
+(`{libraries: {<id>: {...}}}`) — chosen over one file per library because the File System Access
+API's permission grants don't reliably survive multiple simultaneously-connected handles from one
+origin. A pre-existing flat-shape connected file (from before this shipped) is read
+backward-compatibly and upgrades to the wrapped shape on the next save.
 
-Don't assume the four files are in sync before you start — diff the relevant region first
-(`diff <(sed -n 'X,Yp' fileA) <(sed -n 'X,Yp' fileB)`), since ann/dissertation/sefl often carry
-their own unrelated in-flight edits.
+If you're tempted to fork `litflow.html` into a new branded copy for a new project/dataset, don't —
+use the in-app library switcher instead. That's specifically what it replaces.
 
 ## Versioning & changelogs
 

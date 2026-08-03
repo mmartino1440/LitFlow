@@ -106,6 +106,14 @@ header {
 .hbtn-ghost:hover { color: var(--white); border-color: var(--slate); }
 .hbtn-amber { color: var(--navy); background: var(--amber); border-color: var(--amber); font-weight: 700; }
 .hbtn-amber:hover { background: var(--amber-2); }
+.lib-switch { display: flex; align-items: center; gap: 0.35rem; flex-shrink: 0; }
+.lib-switch select {
+  font-size: 0.72rem; font-weight: 600; color: var(--slate);
+  background: transparent; border: 1px solid var(--border); border-radius: 5px;
+  padding: 4px 8px; cursor: pointer; max-width: 140px;
+}
+.lib-switch select:hover, .lib-switch select:focus { color: var(--white); border-color: var(--slate); outline: none; }
+.lib-switch select option { background: var(--navy); color: var(--white); }
 
 /* ── Backup staleness badge ── */
 .settings-wrap { position: relative; display: inline-flex; }
@@ -514,6 +522,10 @@ header {
     <span class="brand-byline">by Mike Martino MD/PhD</span>
   </a>
   <div class="header-divider"></div>
+  <div class="lib-switch">
+    <select id="libSelect" onchange="switchLibrary(this.value)" title="Switch library"></select>
+    <button class="hbtn hbtn-ghost" onclick="openLibraryManageModal()" title="Manage libraries" style="padding:0.4rem 0.55rem">⚙</button>
+  </div>
   <div id="fileStatusChip" style="display:none;font-size:0.72rem;font-weight:600;flex-shrink:0"></div>
   <div class="header-stats" id="headerStats"></div>
   <div class="header-right">
@@ -566,6 +578,16 @@ header {
         <span>⚠ <strong>The data file on disk differs from your local changes.</strong> Choose which version to keep before they sync again.</span>
         <button class="tbtn tbtn-amber" onclick="openConflictModal()" style="margin-left:0.5rem;flex-shrink:0;font-size:0.72rem;padding:3px 10px">Resolve →</button>
         <button class="banner-close" onclick="document.getElementById('fileConflictBanner').style.display='none'" title="Dismiss">×</button>
+      </div>
+      <div class="onboard-banner" id="guidedImportBanner" style="display:none">
+        <span>📚 <strong>Have existing LitFlow data to bring in?</strong> Set up separate libraries — e.g. one per project — and import each one's JSON.</span>
+        <button class="tbtn tbtn-amber" onclick="acceptGuidedImport()" style="margin-left:0.5rem;flex-shrink:0;font-size:0.72rem;padding:3px 10px">Yes, let's set it up →</button>
+        <button class="banner-close" onclick="dismissGuidedImport()" title="Dismiss">×</button>
+      </div>
+      <div class="onboard-banner" id="sharedFileNudgeBanner" style="display:none">
+        <span>📁 <strong>Multiple libraries set up.</strong> Connect one shared data file to back all of them up to disk going forward.</span>
+        <button class="tbtn tbtn-amber" onclick="connectDataFile();document.getElementById('sharedFileNudgeBanner').style.display='none'" style="margin-left:0.5rem;flex-shrink:0;font-size:0.72rem;padding:3px 10px">Connect data file →</button>
+        <button class="banner-close" onclick="document.getElementById('sharedFileNudgeBanner').style.display='none'" title="Dismiss">×</button>
       </div>
       <div id="todayCard"></div>
       <div class="stats-row" id="statsRow"></div>
@@ -877,6 +899,7 @@ header {
             <input type="file" id="importFile" accept=".json" style="display:none" onchange="importJSON(event)">
             <button class="btn btn-outline" onclick="confirmReset()" style="color:#dc2626;border-color:#fca5a5">Reset all data</button>
           </div>
+          <p style="font-size:0.72rem;color:var(--muted);margin-top:0.35rem">Import JSON accepts either a single library's backup or a shared multi-library data file — a multi-library file brings in every library at once as new libraries, without overwriting anything.</p>
           <div id="recoveryStatus"></div>
         </div>
       </div>
@@ -977,6 +1000,22 @@ header {
   </div>
 </div>
 
+<!-- Library manage modal -->
+<div class="modal-bg" id="libraryManageModal">
+  <div class="modal">
+    <h3>Manage libraries</h3>
+    <p style="font-size:0.78rem;color:var(--muted);margin-bottom:0.75rem;line-height:1.5">Each library keeps its own papers, tracks, and settings. For each one you want to bring in: create it below, then use Settings → Data → Import JSON to load its file. Removing a library from this list only unlists it — its data stays in browser storage.</p>
+    <div id="libraryManageList"></div>
+    <div style="display:flex;gap:0.5rem;align-items:center;margin-top:0.75rem;padding-top:0.75rem;border-top:1px solid var(--surf-3)">
+      <input type="text" id="newLibraryName" placeholder="New library name" style="flex:1;font-family:Inter,sans-serif;font-size:0.8rem;border:1px solid var(--surf-3);border-radius:5px;padding:0.35rem 0.6rem" onkeydown="if(event.key==='Enter')submitNewLibrary()">
+      <button class="btn btn-outline" onclick="submitNewLibrary()">+ New Library</button>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeLibraryManageModal()">Close</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ─────────────────────────────────────────
 // DEFAULTS
@@ -1039,12 +1078,43 @@ let tracks  = [];
 let settings = {};
 let currentView = 'today';
 
-// Per-filename storage namespace — isolates data when multiple copies
-// live on the same origin (e.g. litflow.html vs ann-tracker.html on Vercel)
+// Per-filename storage namespace — the original single-library identity.
+// It's also the default/first library's id below, so existing single-library
+// users' data is picked up as-is with zero migration when this ships.
 const NS = (location.pathname.split('/').pop() || 'litflow')
   .replace(/\.html?$/i, '')
   .replace(/[^a-z0-9_-]/gi, '_')
   || 'litflow';
+
+// Multiple libraries — each library's data lives under lf_<id>_*, isolated by
+// a library id. The first library always uses NS as its id (see
+// bootstrapLibraries), so nothing moves for someone who never creates a
+// second library; they just see a one-item dropdown in the header.
+let LIB = NS;
+let showGuidedImport = false; // true only on this browser's very first-ever load
+
+function getLibraries() {
+  try { return JSON.parse(localStorage.getItem('lf_libraries') || '[]'); }
+  catch { return []; }
+}
+function saveLibraries(libs) { localStorage.setItem('lf_libraries', JSON.stringify(libs)); }
+
+// One-time bootstrap: registers the existing NS-keyed data as the first
+// library. Deliberately does NOT scan localStorage for other namespaces —
+// that auto-detection approach was tried and dropped for surfacing stale,
+// confusing results; see the guided create-then-import flow instead
+// (openLibraryManageModal / triggerImport), offered via showGuidedImport.
+function bootstrapLibraries() {
+  if (localStorage.getItem('lf_libraries')) return;
+  let name = 'My Research';
+  try {
+    const s = JSON.parse(localStorage.getItem(`lf_${NS}_settings`) || '{}');
+    if (s.project) name = s.project;
+  } catch {}
+  saveLibraries([{ id: NS, name, createdAt: new Date().toISOString() }]);
+  if (!localStorage.getItem('lf_currentLibrary')) localStorage.setItem('lf_currentLibrary', NS);
+  showGuidedImport = true;
+}
 
 // Disk persistence state
 let fileHandle = null;
@@ -1077,10 +1147,13 @@ async function load() {
     }
   }
 
+  bootstrapLibraries();
+  LIB = localStorage.getItem('lf_currentLibrary') || NS;
+
   // Always load from localStorage first (instant, no async required)
-  papers   = JSON.parse(localStorage.getItem(`lf_${NS}_papers`)  || '[]');
-  tracks   = JSON.parse(localStorage.getItem(`lf_${NS}_tracks`)  || JSON.stringify(DEFAULT_TRACKS));
-  settings = { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem(`lf_${NS}_settings`) || JSON.stringify(DEFAULT_SETTINGS)) };
+  papers   = JSON.parse(localStorage.getItem(`lf_${LIB}_papers`)  || '[]');
+  tracks   = JSON.parse(localStorage.getItem(`lf_${LIB}_tracks`)  || JSON.stringify(DEFAULT_TRACKS));
+  settings = { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem(`lf_${LIB}_settings`) || JSON.stringify(DEFAULT_SETTINGS)) };
   settings.modelByProvider = { ...DEFAULT_SETTINGS.modelByProvider, ...(settings.modelByProvider || {}) };
   if (!tracks.find(t => t.id === 'unassigned')) tracks.unshift(UNASSIGNED_TRACK);
 
@@ -1091,15 +1164,24 @@ async function load() {
     if (!storedHandle) return;
     const perm = await storedHandle.queryPermission({ mode: 'readwrite' });
     if (perm === 'granted') {
-      const d = await readFromFileHandle(storedHandle);
-      if (localIsNewer(d.savedAt)) {
+      const full = await readFromFileHandle(storedHandle);
+      // Backward-compatible with a pre-multi-library connected file (flat
+      // {papers,tracks,settings,savedAt}, no top-level `libraries` key) —
+      // treat the whole payload as this library's own entry so an old file
+      // doesn't look like a false conflict on first load after upgrading.
+      const entry = full.libraries ? full.libraries[LIB] : full;
+      if (!entry) {
+        // Shared file connected but has no section for this library yet
+        // (e.g. a library created after the file was) — next save() adds one.
+        fileHandle = storedHandle;
+      } else if (localIsNewer(entry.savedAt)) {
         // Local has unsaved edits newer than the file — don't clobber silently.
         // Boot is unattended, so just flag it; the UI surfaces a resolve affordance.
         fileHandle = storedHandle;
         fileConflict = true;
-        pendingConflictData = d;
+        pendingConflictData = entry;
       } else {
-        applyDiskPayload(d);
+        applyDiskPayload(entry);
         fileHandle = storedHandle;
       }
     } else {
@@ -1111,12 +1193,34 @@ async function load() {
   }
 }
 
+// Assembles every known library's current data from localStorage into the
+// shape the shared data file stores — {libraries: {<id>: {name, papers,
+// tracks, settings, savedAt}}}. Called right before every write to the shared
+// file so a save to one library never clobbers the others' sections.
+function gatherAllLibrariesForFile() {
+  const out = {};
+  getLibraries().forEach(l => {
+    let p = [], t = [], s = {};
+    try { p = JSON.parse(localStorage.getItem(`lf_${l.id}_papers`) || '[]'); } catch {}
+    try { t = JSON.parse(localStorage.getItem(`lf_${l.id}_tracks`) || '[]'); } catch {}
+    try { s = JSON.parse(localStorage.getItem(`lf_${l.id}_settings`) || '{}'); } catch {}
+    out[l.id] = {
+      name: l.name,
+      papers: p,
+      tracks: t.filter(tr => !tr.builtin),
+      settings: s,
+      savedAt: localStorage.getItem(`lf_${l.id}_last_modified`) || null,
+    };
+  });
+  return out;
+}
+
 // True only if localStorage's last-saved timestamp is strictly newer than the
 // disk file's — i.e. there are local edits the file doesn't have yet.
 // A missing/legacy disk timestamp is treated as "not newer" (never blocks).
 function localIsNewer(diskSavedAt) {
   if (!diskSavedAt) return false;
-  const local = localStorage.getItem(`lf_${NS}_last_modified`);
+  const local = localStorage.getItem(`lf_${LIB}_last_modified`);
   if (!local) return false;
   return new Date(local).getTime() > new Date(diskSavedAt).getTime();
 }
@@ -1138,21 +1242,21 @@ function applyDiskPayload(d) {
 // it gets replaced wholesale (conflict resolution, import, reset) — a self-service
 // undo if the wrong choice is made, without a full version-history system.
 function snapshotRecovery() {
-  localStorage.setItem(`lf_${NS}_recovery`, JSON.stringify({
+  localStorage.setItem(`lf_${LIB}_recovery`, JSON.stringify({
     papers, tracks: tracks.filter(t => !t.builtin), settings,
-    savedAt: localStorage.getItem(`lf_${NS}_last_modified`) || null,
+    savedAt: localStorage.getItem(`lf_${LIB}_last_modified`) || null,
   }));
 }
 
 function save() {
   const savableTracks = tracks.filter(t => !t.builtin);
   const now = new Date().toISOString();
-  localStorage.setItem(`lf_${NS}_papers`,   JSON.stringify(papers));
-  localStorage.setItem(`lf_${NS}_tracks`,   JSON.stringify(savableTracks));
-  localStorage.setItem(`lf_${NS}_settings`, JSON.stringify(settings));
-  localStorage.setItem(`lf_${NS}_last_modified`, now);
+  localStorage.setItem(`lf_${LIB}_papers`,   JSON.stringify(papers));
+  localStorage.setItem(`lf_${LIB}_tracks`,   JSON.stringify(savableTracks));
+  localStorage.setItem(`lf_${LIB}_settings`, JSON.stringify(settings));
+  localStorage.setItem(`lf_${LIB}_last_modified`, now);
   if (fileHandle && !pendingReconnect && !fileConflict) {
-    writeToFileHandle(fileHandle, { papers, tracks: savableTracks, settings, savedAt: now })
+    writeToFileHandle(fileHandle, { libraries: gatherAllLibrariesForFile() })
       .catch(e => console.warn('LitFlow: file write failed:', e.message));
   }
 }
@@ -1170,11 +1274,16 @@ function openHandleDB() {
     req.onerror   = e => reject(e.target.error);
   });
 }
+// One shared file handle for the whole app, not one per library — the File
+// System Access permission grant doesn't reliably survive for multiple
+// simultaneously-connected handles from the same origin, so a single file
+// covering all libraries (see gatherAllLibrariesForFile) avoids re-prompting.
+const SHARED_HANDLE_KEY = '__shared__';
 async function storeFileHandle(handle) {
   const db = await openHandleDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction('handles', 'readwrite');
-    tx.objectStore('handles').put(handle, NS);
+    tx.objectStore('handles').put(handle, SHARED_HANDLE_KEY);
     tx.oncomplete = resolve;
     tx.onerror = e => reject(e.target.error);
   });
@@ -1183,7 +1292,7 @@ async function getStoredFileHandle() {
   const db = await openHandleDB();
   return new Promise((resolve, reject) => {
     const tx  = db.transaction('handles', 'readonly');
-    const req = tx.objectStore('handles').get(NS);
+    const req = tx.objectStore('handles').get(SHARED_HANDLE_KEY);
     req.onsuccess = e => resolve(e.target.result || null);
     req.onerror   = e => reject(e.target.error);
   });
@@ -1192,7 +1301,7 @@ async function clearFileHandle() {
   const db = await openHandleDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction('handles', 'readwrite');
-    tx.objectStore('handles').delete(NS);
+    tx.objectStore('handles').delete(SHARED_HANDLE_KEY);
     tx.oncomplete = resolve;
     tx.onerror = e => reject(e.target.error);
   });
@@ -1222,15 +1331,14 @@ async function connectDataFile() {
   try {
     const handle = await window.showSaveFilePicker({
       suggestedName: 'litflow-data.json',
-      types: [{ description: 'LitFlow Data', accept: { 'application/json': ['.json'] } }],
+      types: [{ description: 'LitFlow Data (all libraries)', accept: { 'application/json': ['.json'] } }],
     });
     await storeFileHandle(handle);
     fileHandle = handle;
     pendingReconnect = false;
-    const savableTracks = tracks.filter(t => !t.builtin);
     const now = new Date().toISOString();
-    await writeToFileHandle(handle, { papers, tracks: savableTracks, settings, savedAt: now });
-    localStorage.setItem(`lf_${NS}_last_modified`, now);
+    localStorage.setItem(`lf_${LIB}_last_modified`, now);
+    await writeToFileHandle(handle, { libraries: gatherAllLibrariesForFile() });
     updateFileStatusUI();
     const msg = document.getElementById('fileConnectMsg');
     if (msg) { msg.textContent = 'Connected ✓'; setTimeout(() => msg.textContent = '', 3000); }
@@ -1244,8 +1352,9 @@ async function reconnectFile() {
   try {
     const granted = await verifyPermission(fileHandle);
     if (!granted) return;
-    const d = await readFromFileHandle(fileHandle);
-    if (localIsNewer(d.savedAt)) {
+    const full = await readFromFileHandle(fileHandle);
+    const d = full.libraries ? full.libraries[LIB] : full;
+    if (d && localIsNewer(d.savedAt)) {
       // User-initiated, so it's safe to interrupt with a choice.
       pendingReconnect = false;
       fileConflict = true;
@@ -1254,7 +1363,7 @@ async function reconnectFile() {
       openConflictModal();
       return;
     }
-    applyDiskPayload(d);
+    if (d) applyDiskPayload(d);
     pendingReconnect = false;
     fileConflict = false;
     pendingConflictData = null;
@@ -1369,7 +1478,7 @@ function openConflictModal() {
   if (err) err.textContent = '';
   if (body) {
     const localCount = papers.length;
-    const localTime  = fmtTimestamp(localStorage.getItem(`lf_${NS}_last_modified`));
+    const localTime  = fmtTimestamp(localStorage.getItem(`lf_${LIB}_last_modified`));
     const diskCount  = (pendingConflictData.papers || []).length;
     const diskTime   = fmtTimestamp(pendingConflictData.savedAt);
     body.innerHTML = `
@@ -1400,10 +1509,9 @@ function resolveConflictLoadFile() {
 async function resolveConflictKeepMine() {
   const err = document.getElementById('conflictModalError');
   try {
-    const savableTracks = tracks.filter(t => !t.builtin);
     const now = new Date().toISOString();
-    await writeToFileHandle(fileHandle, { papers, tracks: savableTracks, settings, savedAt: now });
-    localStorage.setItem(`lf_${NS}_last_modified`, now);
+    localStorage.setItem(`lf_${LIB}_last_modified`, now);
+    await writeToFileHandle(fileHandle, { libraries: gatherAllLibrariesForFile() });
     fileConflict = false;
     pendingConflictData = null;
     document.getElementById('conflictModal').classList.remove('open');
@@ -2510,26 +2618,26 @@ function exportJSON() {
   a.href = URL.createObjectURL(b);
   a.download = 'litflow-backup-' + new Date().toISOString().split('T')[0] + '.json';
   a.click();
-  localStorage.setItem(`lf_${NS}_last_backup`, new Date().toISOString());
+  localStorage.setItem(`lf_${LIB}_last_backup`, new Date().toISOString());
   checkBackupStatus();
 }
 
 function checkBackupStatus() {
   if (papers.length === 0) return; // nothing to lose — stay quiet
-  const lastBackup = localStorage.getItem(`lf_${NS}_last_backup`);
+  const lastBackup = localStorage.getItem(`lf_${LIB}_last_backup`);
   const stale = !lastBackup || (Date.now() - new Date(lastBackup).getTime()) > 7 * 24 * 60 * 60 * 1000;
   const badge = document.getElementById('backupBadge');
   if (badge) badge.classList.toggle('show', stale);
 
   // First-run banner: shown once until dismissed, only when no backup has ever been taken
-  if (!lastBackup && !localStorage.getItem(`lf_${NS}_onboarded`)) {
+  if (!lastBackup && !localStorage.getItem(`lf_${LIB}_onboarded`)) {
     const banner = document.getElementById('onboardBanner');
     if (banner) banner.style.display = 'flex';
   }
 }
 
 function dismissOnboard() {
-  localStorage.setItem(`lf_${NS}_onboarded`, '1');
+  localStorage.setItem(`lf_${LIB}_onboarded`, '1');
   const banner = document.getElementById('onboardBanner');
   if (banner) banner.style.display = 'none';
 }
@@ -2661,12 +2769,26 @@ function importJSON(e) {
   r.onload = ev => {
     try {
       const d = JSON.parse(ev.target.result);
-      let importedPapers, importedTracks;
+
+      // Multi-library bundle ({libraries: {<id>: {name, papers, tracks, settings}}}) --
+      // a shared data file, or another library's export of one -- imports every
+      // library in it as its own new library, instead of forcing a one-at-a-time
+      // single-library import for each.
+      if (d.libraries && typeof d.libraries === 'object' && !Array.isArray(d.libraries)) {
+        importLibraryBundle(d.libraries);
+        e.target.value = '';
+        return;
+      }
+
+      let importedPapers, importedTracks, importedProject;
       if (Array.isArray(d)) {
         importedPapers = d;
       } else if (d.papers) {
         importedPapers = d.papers;
         importedTracks = d.tracks;
+        // Only the cosmetic project label carries over -- never apiKey/provider/model,
+        // so importing someone else's export can't silently swap in their LLM config.
+        importedProject = d.settings && d.settings.project;
       }
       if (!importedPapers) { alert('Invalid JSON file.'); return; }
       pendingImportData = {
@@ -2675,6 +2797,7 @@ function importJSON(e) {
           track: /^\d+$/.test(p.track || '') ? `t${p.track}` : (p.track || 'unassigned')
         })),
         tracks: importedTracks,
+        project: importedProject,
       };
       if (papers.length === 0) {
         applyImport();
@@ -2686,10 +2809,42 @@ function importJSON(e) {
   r.readAsText(file);
 }
 
+// Imports every library from a multi-library bundle file as a brand-new named
+// library each -- never overwrites an existing library, always fresh ids --
+// so bringing in a reference/backup bundle is always additive, never destructive.
+function importLibraryBundle(bundleLibraries) {
+  const libs = getLibraries();
+  const entries = Object.entries(bundleLibraries);
+  if (!entries.length) { alert('That file has no libraries in it.'); return; }
+  let imported = 0;
+  entries.forEach(([bundleId, entry]) => {
+    if (!entry || !Array.isArray(entry.papers)) return;
+    const newId = 'lib_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6) + imported;
+    const fixedPapers = entry.papers.map(p => ({
+      ...p,
+      track: /^\d+$/.test(p.track || '') ? `t${p.track}` : (p.track || 'unassigned'),
+    }));
+    // Never carry a real apiKey into a new library from an imported bundle --
+    // same redaction exportJSON() already applies when writing a backup out.
+    const fixedSettings = { ...(entry.settings || {}), apiKey: '' };
+    localStorage.setItem(`lf_${newId}_papers`, JSON.stringify(fixedPapers));
+    localStorage.setItem(`lf_${newId}_tracks`, JSON.stringify(entry.tracks || []));
+    localStorage.setItem(`lf_${newId}_settings`, JSON.stringify(fixedSettings));
+    if (entry.savedAt) localStorage.setItem(`lf_${newId}_last_modified`, entry.savedAt);
+    libs.push({ id: newId, name: entry.name || bundleId, createdAt: new Date().toISOString() });
+    imported++;
+  });
+  saveLibraries(libs);
+  renderLibrarySelect();
+  if (document.getElementById('libraryManageModal')?.classList.contains('open')) renderLibraryManageList();
+  alert(`Imported ${imported} librar${imported === 1 ? 'y' : 'ies'} from the file. Switch to ${imported === 1 ? 'it' : 'them'} from the header dropdown.`);
+}
+
 function applyImport() {
   if (!pendingImportData) return;
   papers = pendingImportData.papers;
   if (pendingImportData.tracks) tracks = pendingImportData.tracks;
+  if (pendingImportData.project) settings.project = pendingImportData.project;
   pendingImportData = null;
   save();
   updateHeader(); updateSidebar(); showView('today');
@@ -2711,11 +2866,11 @@ function confirmReset() { document.getElementById('resetModal').classList.add('o
 function closeModal()   { document.getElementById('resetModal').classList.remove('open'); }
 function doReset() {
   snapshotRecovery();
-  localStorage.removeItem(`lf_${NS}_papers`);
-  localStorage.removeItem(`lf_${NS}_tracks`);
-  localStorage.removeItem(`lf_${NS}_settings`);
-  localStorage.removeItem(`lf_${NS}_last_modified`);
-  closeModal(); load(); updateHeader(); updateSidebar(); showView('today'); checkRecoveryStatus();
+  localStorage.removeItem(`lf_${LIB}_papers`);
+  localStorage.removeItem(`lf_${LIB}_tracks`);
+  localStorage.removeItem(`lf_${LIB}_settings`);
+  localStorage.removeItem(`lf_${LIB}_last_modified`);
+  closeModal(); load().then(reinitUI);
 }
 
 // ─────────────────────────────────────────
@@ -2725,11 +2880,11 @@ function doReset() {
 function checkRecoveryStatus() {
   const el = document.getElementById('recoveryStatus');
   if (!el) return;
-  const raw = localStorage.getItem(`lf_${NS}_recovery`);
+  const raw = localStorage.getItem(`lf_${LIB}_recovery`);
   if (!raw) { el.innerHTML = ''; return; }
   let snap;
   try { snap = JSON.parse(raw); } catch { el.innerHTML = ''; return; }
-  const currentModified = localStorage.getItem(`lf_${NS}_last_modified`);
+  const currentModified = localStorage.getItem(`lf_${LIB}_last_modified`);
   if (snap.savedAt && snap.savedAt === currentModified) { el.innerHTML = ''; return; }
   const count = (snap.papers || []).length;
   el.innerHTML = `
@@ -2740,7 +2895,7 @@ function checkRecoveryStatus() {
 }
 
 function restoreRecoverySnapshot() {
-  const raw = localStorage.getItem(`lf_${NS}_recovery`);
+  const raw = localStorage.getItem(`lf_${LIB}_recovery`);
   if (!raw) return;
   let snap;
   try { snap = JSON.parse(raw); } catch { return; }
@@ -2761,18 +2916,138 @@ function esc(s) {
 }
 
 // ─────────────────────────────────────────
-// INIT
+// LIBRARIES
 // ─────────────────────────────────────────
 
-load().then(() => {
+function reinitUI() {
   renderTrackSelects();
+  renderLibrarySelect();
   updateSidebar();
   updateHeader();
   showView('today');
   checkBackupStatus();
   updateFileStatusUI();
   checkRecoveryStatus();
-});
+  if (showGuidedImport) {
+    showGuidedImport = false;
+    const banner = document.getElementById('guidedImportBanner');
+    if (banner) banner.style.display = 'flex';
+  }
+}
+
+function renderLibrarySelect() {
+  const sel = document.getElementById('libSelect');
+  if (!sel) return;
+  sel.innerHTML = getLibraries()
+    .map(l => `<option value="${l.id}"${l.id === LIB ? ' selected' : ''}>${esc(l.name)}</option>`)
+    .join('');
+}
+
+async function switchLibrary(id) {
+  if (id === LIB) return;
+  localStorage.setItem('lf_currentLibrary', id);
+  // Transient state belongs to the library being left — a connected file handle
+  // or pending import for library A must never silently apply to library B.
+  fileHandle = null;
+  pendingReconnect = false;
+  fileConflict = false;
+  pendingConflictData = null;
+  pendingImportData = null;
+  await load();
+  reinitUI();
+}
+
+function createLibrary(name) {
+  const libs = getLibraries();
+  const id = 'lib_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  libs.push({ id, name: name || 'New Library', createdAt: new Date().toISOString() });
+  saveLibraries(libs);
+  switchLibrary(id).then(() => {
+    renderLibraryManageList();
+    if (confirm(`"${name}" is ready and selected.\n\nImport a LitFlow JSON file into it now?`)) {
+      triggerImport();
+    }
+  });
+}
+
+function renameLibrary(id, name) {
+  const libs = getLibraries();
+  const lib = libs.find(l => l.id === id);
+  if (!lib || !name) return;
+  lib.name = name;
+  saveLibraries(libs);
+  renderLibrarySelect();
+}
+
+// Removes a library from the index only — its lf_<id>_* data is left in
+// localStorage untouched (cheap to keep, and avoids a hard, unrecoverable
+// delete for what's really just an "unlist" action).
+function deleteLibrary(id, btn) {
+  if (btn && btn.dataset.armed !== '1') {
+    btn.dataset.armed = '1';
+    btn.textContent = 'Confirm?';
+    setTimeout(() => { if (btn.isConnected) { btn.dataset.armed = '0'; btn.textContent = '✕'; } }, 3000);
+    return;
+  }
+  let libs = getLibraries();
+  if (libs.length <= 1) return;
+  libs = libs.filter(l => l.id !== id);
+  saveLibraries(libs);
+  if (id === LIB) switchLibrary(libs[0].id);
+  else { renderLibrarySelect(); renderLibraryManageList(); }
+}
+
+function openLibraryManageModal() {
+  renderLibraryManageList();
+  document.getElementById('libraryManageModal').classList.add('open');
+}
+function closeLibraryManageModal() {
+  document.getElementById('libraryManageModal').classList.remove('open');
+  // One-time nudge toward the shared data file once there's more than one
+  // library and nothing is connected yet — the natural next step.
+  if (getLibraries().length > 1 && !fileHandle && fileSystemSupported) {
+    const el = document.getElementById('sharedFileNudgeBanner');
+    if (el) el.style.display = 'flex';
+  }
+}
+
+function renderLibraryManageList() {
+  const el = document.getElementById('libraryManageList');
+  if (!el) return;
+  const libs = getLibraries();
+  el.innerHTML = libs.map(l => {
+    let count = 0;
+    try { count = (JSON.parse(localStorage.getItem(`lf_${l.id}_papers`) || '[]')).length; } catch {}
+    return `
+    <div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.4rem">
+      <input type="text" value="${esc(l.name)}" onchange="renameLibrary('${l.id}',this.value)" style="flex:1;font-family:Inter,sans-serif;font-size:0.8rem;border:1px solid var(--surf-3);border-radius:5px;padding:0.35rem 0.6rem">
+      <span style="font-size:0.7rem;color:var(--muted);white-space:nowrap">${count} paper${count === 1 ? '' : 's'}</span>
+      <button class="btn btn-outline" onclick="deleteLibrary('${l.id}',this)" ${libs.length <= 1 ? 'disabled' : ''} style="flex-shrink:0;color:#dc2626;border-color:#fca5a5">✕</button>
+    </div>`;
+  }).join('');
+}
+
+function submitNewLibrary() {
+  const input = document.getElementById('newLibraryName');
+  const name = (input.value || '').trim();
+  if (!name) return;
+  input.value = '';
+  createLibrary(name);
+}
+
+function acceptGuidedImport() {
+  document.getElementById('guidedImportBanner').style.display = 'none';
+  openLibraryManageModal();
+}
+function dismissGuidedImport() {
+  document.getElementById('guidedImportBanner').style.display = 'none';
+}
+
+// ─────────────────────────────────────────
+// INIT
+// ─────────────────────────────────────────
+
+load().then(reinitUI);
 </script>
 </body>
 </html>
